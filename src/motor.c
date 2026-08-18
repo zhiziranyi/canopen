@@ -191,7 +191,11 @@ int motor_align_foc(void)
 
 void motor_enable(void)
 {
-    if (s_fault != MOTOR_FAULT_NONE || !encoder_is_healthy()) {
+    if (s_fault != MOTOR_FAULT_NONE) {
+        return;
+    }
+    if (!encoder_is_healthy()) {
+        motor_latch_fault(MOTOR_FAULT_ENCODER);
         return;
     }
     pid_reset(&s_curr_id_pid);
@@ -309,7 +313,9 @@ void motor_clear_fault(void)
     if (s_fault == MOTOR_FAULT_ENCODER && !encoder_is_healthy()) {
         return;
     }
-    s_fault = MOTOR_FAULT_NONE;
+    if (s_fault == MOTOR_FAULT_ENCODER || s_fault == MOTOR_FAULT_OVERCURRENT) {
+        s_fault = MOTOR_FAULT_NONE;
+    }
 }
 
 void motor_current_loop_isr(void)

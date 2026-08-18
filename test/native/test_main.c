@@ -132,6 +132,16 @@ static void test_cia402_fault_requires_reset_edge(void)
     CHECK_TRUE(cia402_sm_statusword(&sm) == 0x0240u);
 }
 
+static void test_cia402_supported_modes_are_explicit(void)
+{
+    CHECK_TRUE(cia402_mode_supported(1));
+    CHECK_TRUE(cia402_mode_supported(3));
+    CHECK_TRUE(cia402_mode_supported(6));
+    CHECK_TRUE(!cia402_mode_supported(0));
+    CHECK_TRUE(!cia402_mode_supported(2));
+    CHECK_TRUE(!cia402_mode_supported(4));
+}
+
 static void test_motion_profile_handles_forward_reverse_and_stop(void)
 {
     motion_profile_t profile;
@@ -179,6 +189,7 @@ int main(void)
     test_encoder_accumulates_and_zeros_position();
     test_cia402_standard_enable_sequence();
     test_cia402_fault_requires_reset_edge();
+    test_cia402_supported_modes_are_explicit();
     test_motion_profile_handles_forward_reverse_and_stop();
     test_motion_profile_brakes_near_target();
 

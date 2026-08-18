@@ -132,3 +132,8 @@ cia402_state_t cia402_sm_state(const cia402_sm_t* sm)
 {
     return (sm != NULL) ? sm->state : CIA402_STATE_NOT_READY_TO_SWITCH_ON;
 }
+
+bool cia402_mode_supported(int8_t mode)
+{
+    return mode == 1 || mode == 3 || mode == 6;
+}
