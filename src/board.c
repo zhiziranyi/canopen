@@ -284,9 +284,6 @@ static void MX_TIM1_Init(void)
     HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1);
     HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2);
     HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3);
-    /* Internal CH4 midpoint event is the deterministic ADC current trigger. */
-    sConfigOC.Pulse = htim1.Init.Period / 2u;
-    HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4);
 
     sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
     sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
@@ -369,8 +366,8 @@ static void MX_ADC1_Init(void)
     sConfigInjected.InjectedRank = 1;
     sConfigInjected.InjectedNbrOfConversion = 1;
     sConfigInjected.InjectedSamplingTime = ADC_SAMPLETIME_480CYCLES;
-    sConfigInjected.ExternalTrigInjecConv = ADC_EXTERNALTRIGINJECCONV_T1_CC4;
-    sConfigInjected.ExternalTrigInjecConvEdge = ADC_EXTERNALTRIGINJECCONVEDGE_RISING;
+    sConfigInjected.ExternalTrigInjecConv = ADC_INJECTED_SOFTWARE_START;
+    sConfigInjected.ExternalTrigInjecConvEdge = ADC_EXTERNALTRIGINJECCONVEDGE_NONE;
     sConfigInjected.AutoInjectedConv = DISABLE;
     sConfigInjected.InjectedDiscontinuousConvMode = DISABLE;
     sConfigInjected.InjectedOffset = 0;

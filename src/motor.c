@@ -152,7 +152,6 @@ int motor_init(void)
     status = HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
     if (status == HAL_OK) status = HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
     if (status == HAL_OK) status = HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
-    if (status == HAL_OK) status = HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_4);
     if (status == HAL_OK) status = HAL_TIM_Base_Start_IT(&htim1);
     if (status == HAL_OK) status = HAL_TIM_Base_Start_IT(&htim7);
     if (status != HAL_OK) {
@@ -379,6 +378,7 @@ void motor_current_loop_isr(void)
 
     if ((s_aligning != 0u || s_enabled) && fabsf(s_iu) > OVERCURRENT_TRIP_A) {
         motor_latch_fault(MOTOR_FAULT_OVERCURRENT);
+        (void)adc_start_sample();
         return;
     }
 
@@ -392,11 +392,13 @@ void motor_current_loop_isr(void)
                                sin_e, cos_e,
                                MOTOR_BUS_VOLTAGE, &du, &dv, &dw);
         pwm_set_duty(du, dv, dw);
+        (void)adc_start_sample();
         return;
     }
 
     if (!s_enabled || s_fault != MOTOR_FAULT_NONE) {
         pwm_set_duty(0.0f, 0.0f, 0.0f);
+        (void)adc_start_sample();
         return;
     }
 
@@ -429,6 +431,7 @@ void motor_current_loop_isr(void)
     foc_inverse_park_svpwm(vd, vq, sin_e, cos_e,
                            MOTOR_BUS_VOLTAGE, &du, &dv, &dw);
     pwm_set_duty(du, dv, dw);
+    (void)adc_start_sample();
 }
 
 void motor_velocity_loop_isr(void)

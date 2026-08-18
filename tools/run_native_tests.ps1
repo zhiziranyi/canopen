@@ -53,11 +53,14 @@ try {
         throw 'default voltage limit must be the validated 2.0 V startup value'
     }
 
-    if ($boardSource -notmatch 'ADC_EXTERNALTRIGINJECCONV_T1_CC4') {
-        throw 'ADC injected conversion must use the TIM1 channel 4 midpoint trigger'
+    if ($boardSource -notmatch 'ADC_INJECTED_SOFTWARE_START') {
+        throw 'ADC injected conversion must use the validated software trigger'
     }
     if ($motorSource -notmatch 's_current_offset_raw' -or $motorSource -notmatch 'motor_calibrate_current_zero') {
         throw 'motor current sensing must calibrate its zero-current ADC offset before alignment'
+    }
+    if ($motorSource -notmatch '(?s)void\s+motor_current_loop_isr\s*\([^)]*\).*?adc_start_sample\s*\(') {
+        throw 'TIM1 current ISR must continue to request injected ADC samples'
     }
 
     & gcc -std=c11 -Wall -Wextra -Werror -Isrc `
