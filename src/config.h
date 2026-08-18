@@ -37,6 +37,9 @@
 /* ---------------- 限制与保护 ---------------- */
 #define VOLTAGE_LIMIT_V     2.0f       /* Conservative startup torque; 0.8 A OCP remains active. */
 #define CURRENT_LIMIT_A     0.6f
+#define CURRENT_SOFT_LIMIT_A 0.45f      /* Proactively reduce Vq before hard OCP. */
+#define VOLTAGE_RISE_V_PER_S 8.0f
+#define VOLTAGE_FALL_V_PER_S 100.0f
 #define VELOCITY_LIMIT_CPS  50000.0f   /* counts/s，约 12 rev/s */
 #define OVERCURRENT_TRIP_A  0.8f
 

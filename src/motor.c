@@ -7,6 +7,7 @@
 #include "foc.h"
 #include "motion_profile.h"
 #include "pid.h"
+#include "voltage_limiter.h"
 
 #include <math.h>
 
@@ -42,6 +43,7 @@ static pid_t s_curr_iq_pid;
 static pid_t s_vel_pid;
 static motion_profile_t s_position_profile;
 static float s_pos_kp = POS_P_DEFAULT;
+static voltage_limiter_t s_voltage_limiter;
 
 static float clamp01(float value)
 {
@@ -81,6 +83,7 @@ static void motor_latch_fault(motor_fault_t fault)
     s_torque_voltage = 0.0f;
     s_current_target = 0.0f;
     s_velocity_cmd = 0.0f;
+    voltage_limiter_init(&s_voltage_limiter);
     pwm_set_duty(0.0f, 0.0f, 0.0f);
     HAL_GPIO_WritePin(PIN_DRV_EN_GPIO, PIN_DRV_EN_PIN, GPIO_PIN_RESET);
 }
@@ -134,6 +137,7 @@ int motor_init(void)
     s_current_calibration_samples = 0u;
     s_current_calibration_sum = 0u;
     s_current_calibrated = 0u;
+    voltage_limiter_init(&s_voltage_limiter);
     HAL_GPIO_WritePin(PIN_DRV_EN_GPIO, PIN_DRV_EN_PIN, GPIO_PIN_RESET);
     pwm_set_duty(0.0f, 0.0f, 0.0f);
 
@@ -239,6 +243,7 @@ void motor_enable(void)
     s_torque_voltage = 0.0f;
     s_current_target = 0.0f;
     s_velocity_cmd = 0.0f;
+    voltage_limiter_init(&s_voltage_limiter);
     HAL_GPIO_WritePin(PIN_DRV_EN_GPIO, PIN_DRV_EN_PIN, GPIO_PIN_SET);
     s_enabled = 1;
 }
@@ -250,6 +255,7 @@ void motor_disable(void)
     s_current_target = 0.0f;
     s_velocity_cmd = 0.0f;
     s_position_mode = 0;
+    voltage_limiter_init(&s_voltage_limiter);
     motion_profile_stop(&s_position_profile);
     pwm_set_duty(0.0f, 0.0f, 0.0f);
     HAL_GPIO_WritePin(PIN_DRV_EN_GPIO, PIN_DRV_EN_PIN, GPIO_PIN_RESET);
@@ -410,7 +416,10 @@ void motor_current_loop_isr(void)
     vd = pid_update(&s_curr_id_pid, -id_value);
     vq = pid_update(&s_curr_iq_pid, s_current_target - iq_value);
 #else
-    vq = s_torque_voltage;
+    vq = voltage_limiter_step(&s_voltage_limiter, s_torque_voltage, s_iu,
+                              VOLTAGE_LIMIT_V, CURRENT_SOFT_LIMIT_A,
+                              VOLTAGE_RISE_V_PER_S / (float)FOC_LOOP_HZ,
+                              VOLTAGE_FALL_V_PER_S / (float)FOC_LOOP_HZ);
 #endif
     s_vcmd = vq;
     foc_inverse_park_svpwm(vd, vq, sin_e, cos_e,

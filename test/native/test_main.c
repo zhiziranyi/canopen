@@ -4,6 +4,7 @@
 #include "foc.h"
 #include "motion_profile.h"
 #include "pid.h"
+#include "voltage_limiter.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -85,6 +86,22 @@ static void test_fast_sin_cos_tracks_unit_circle(void)
         CHECK_NEAR(cos_value, cosf(angles[index]), 0.002f);
         CHECK_NEAR(sin_value * sin_value + cos_value * cos_value, 1.0f, 0.004f);
     }
+}
+
+static void test_voltage_limiter_ramps_and_soft_limits_current(void)
+{
+    voltage_limiter_t limiter;
+
+    voltage_limiter_init(&limiter);
+    CHECK_NEAR(voltage_limiter_step(&limiter, 2.0f, 0.0f,
+                                    2.0f, 0.45f, 0.10f, 0.50f),
+               0.10f, 1.0e-6f);
+    CHECK_NEAR(voltage_limiter_step(&limiter, 2.0f, 0.0f,
+                                    2.0f, 0.45f, 0.10f, 0.50f),
+               0.20f, 1.0e-6f);
+    CHECK_NEAR(voltage_limiter_step(&limiter, 2.0f, 0.50f,
+                                    2.0f, 0.45f, 0.10f, 0.50f),
+               0.0f, 1.0e-6f);
 }
 
 static void test_pid_saturates_and_resets(void)
@@ -218,6 +235,7 @@ int main(void)
     test_svpwm_outputs_are_bounded();
     test_clarke_park_d_axis();
     test_fast_sin_cos_tracks_unit_circle();
+    test_voltage_limiter_ramps_and_soft_limits_current();
     test_pid_saturates_and_resets();
     test_encoder_wrap_is_one_count();
     test_encoder_accumulates_and_zeros_position();

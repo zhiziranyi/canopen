@@ -60,6 +60,7 @@ try {
         test/native/test_main.c `
         src/foc.c `
         src/fast_trig.c `
+        src/voltage_limiter.c `
         src/pid.c `
         src/encoder_math.c `
         src/cia402_sm.c `
