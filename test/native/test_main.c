@@ -1,3 +1,4 @@
+#include "cia402_sm.h"
 #include "encoder_math.h"
 #include "foc.h"
 #include "pid.h"
@@ -99,6 +100,37 @@ static void test_encoder_accumulates_and_zeros_position(void)
     CHECK_TRUE(encoder_math_position(&encoder) == 0);
 }
 
+static void test_cia402_standard_enable_sequence(void)
+{
+    cia402_sm_t sm;
+
+    cia402_sm_init(&sm);
+    CHECK_TRUE(cia402_sm_statusword(&sm) == 0x0240u);
+    cia402_sm_step(&sm, 0x0006u, false);
+    CHECK_TRUE(cia402_sm_statusword(&sm) == 0x0231u);
+    cia402_sm_step(&sm, 0x0007u, false);
+    CHECK_TRUE(cia402_sm_statusword(&sm) == 0x0233u);
+    cia402_sm_step(&sm, 0x000Fu, false);
+    CHECK_TRUE(cia402_sm_operation_enabled(&sm));
+    CHECK_TRUE(cia402_sm_statusword(&sm) == 0x0237u);
+    cia402_sm_step(&sm, 0x000Bu, false);
+    CHECK_TRUE(!cia402_sm_operation_enabled(&sm));
+    CHECK_TRUE(cia402_sm_statusword(&sm) == 0x0217u);
+}
+
+static void test_cia402_fault_requires_reset_edge(void)
+{
+    cia402_sm_t sm;
+
+    cia402_sm_init(&sm);
+    cia402_sm_step(&sm, 0x0000u, true);
+    CHECK_TRUE(cia402_sm_statusword(&sm) == 0x0208u);
+    cia402_sm_step(&sm, 0x0000u, false);
+    CHECK_TRUE(cia402_sm_statusword(&sm) == 0x0208u);
+    cia402_sm_step(&sm, 0x0080u, false);
+    CHECK_TRUE(cia402_sm_statusword(&sm) == 0x0240u);
+}
+
 int main(void)
 {
     test_svpwm_zero_vector_is_centered();
@@ -107,6 +139,8 @@ int main(void)
     test_pid_saturates_and_resets();
     test_encoder_wrap_is_one_count();
     test_encoder_accumulates_and_zeros_position();
+    test_cia402_standard_enable_sequence();
+    test_cia402_fault_requires_reset_edge();
 
     if (failures != 0) {
         (void)printf("native tests: FAIL (%d)\n", failures);
