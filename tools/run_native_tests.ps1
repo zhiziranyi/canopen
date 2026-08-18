@@ -45,8 +45,15 @@ try {
 
     $configSource = Get-Content -LiteralPath 'src/config.h' -Raw
     $voltageLimitMatch = [regex]::Match($configSource, '(?m)^#define\s+VOLTAGE_LIMIT_V\s+([0-9.]+)f')
-    if (-not $voltageLimitMatch.Success -or [float]$voltageLimitMatch.Groups[1].Value -lt 2.5) {
-        throw 'default voltage limit must provide enough startup torque (at least 2.5 V)'
+    if (-not $voltageLimitMatch.Success -or [float]$voltageLimitMatch.Groups[1].Value -ne 2.0) {
+        throw 'default voltage limit must be the validated 2.0 V startup value'
+    }
+
+    if ($boardSource -notmatch 'ADC_EXTERNALTRIGINJECCONV_T1_CC4') {
+        throw 'ADC injected conversion must use the TIM1 channel 4 midpoint trigger'
+    }
+    if ($motorSource -notmatch 's_current_offset_raw' -or $motorSource -notmatch 'motor_calibrate_current_zero') {
+        throw 'motor current sensing must calibrate its zero-current ADC offset before alignment'
     }
 
     & gcc -std=c11 -Wall -Wextra -Werror -Isrc `

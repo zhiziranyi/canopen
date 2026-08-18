@@ -13,6 +13,8 @@
 #define MOTOR_ALIGN_TEST_ANGLE_RAD 1.04719755f
 #define MOTOR_TWO_PI_RAD 6.28318531f
 #define MOTOR_CONTROL_START_MIN_UPDATES 100u
+#define MOTOR_CURRENT_ZERO_SAMPLES 128u
+#define MOTOR_CURRENT_ZERO_TIMEOUT_MS 50u
 
 static volatile int s_enabled = 0;
 static volatile motor_fault_t s_fault = MOTOR_FAULT_NONE;
@@ -30,6 +32,10 @@ static volatile float s_align_v = 0.0f;
 static volatile float s_align_angle = 0.0f;
 static volatile uint32_t s_control_update_count = 0u;
 static volatile uint32_t s_velocity_tick_count = 0u;
+static volatile uint16_t s_current_offset_raw = 2048u;
+static volatile uint16_t s_current_calibration_samples = 0u;
+static volatile uint32_t s_current_calibration_sum = 0u;
+static volatile uint8_t s_current_calibrated = 0u;
 
 static pid_t s_curr_id_pid;
 static pid_t s_curr_iq_pid;
@@ -79,12 +85,32 @@ static void motor_latch_fault(motor_fault_t fault)
     HAL_GPIO_WritePin(PIN_DRV_EN_GPIO, PIN_DRV_EN_PIN, GPIO_PIN_RESET);
 }
 
-static void adc_start_sample(void)
+static int adc_start_sample(void)
 {
     HAL_StatusTypeDef status = HAL_ADCEx_InjectedStart_IT(&hadc1);
-    if (status != HAL_OK && status != HAL_BUSY) {
-        motor_latch_fault(MOTOR_FAULT_INIT);
+    if (status == HAL_OK || status == HAL_BUSY) {
+        return 0;
     }
+    motor_latch_fault(MOTOR_FAULT_INIT);
+    return -1;
+}
+
+static int motor_calibrate_current_zero(void)
+{
+    uint32_t start_tick = HAL_GetTick();
+
+    while (s_current_calibration_samples < MOTOR_CURRENT_ZERO_SAMPLES) {
+        if ((HAL_GetTick() - start_tick) >= MOTOR_CURRENT_ZERO_TIMEOUT_MS) {
+            motor_latch_fault(MOTOR_FAULT_INIT);
+            return -1;
+        }
+    }
+
+    s_current_offset_raw = (uint16_t)(s_current_calibration_sum
+                         / (uint32_t)s_current_calibration_samples);
+    s_current_calibrated = 1u;
+    dbg_printf("[CURRENT] zero=%u\r\n", (unsigned)s_current_offset_raw);
+    return 0;
 }
 
 static float wrap_mechanical_delta(float delta)
@@ -104,6 +130,10 @@ int motor_init(void)
     s_enabled = 0;
     s_aligning = 0u;
     s_fault = MOTOR_FAULT_NONE;
+    s_current_offset_raw = 2048u;
+    s_current_calibration_samples = 0u;
+    s_current_calibration_sum = 0u;
+    s_current_calibrated = 0u;
     HAL_GPIO_WritePin(PIN_DRV_EN_GPIO, PIN_DRV_EN_PIN, GPIO_PIN_RESET);
     pwm_set_duty(0.0f, 0.0f, 0.0f);
 
@@ -118,6 +148,7 @@ int motor_init(void)
     status = HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
     if (status == HAL_OK) status = HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
     if (status == HAL_OK) status = HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
+    if (status == HAL_OK) status = HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_4);
     if (status == HAL_OK) status = HAL_TIM_Base_Start_IT(&htim1);
     if (status == HAL_OK) status = HAL_TIM_Base_Start_IT(&htim7);
     if (status != HAL_OK) {
@@ -125,7 +156,9 @@ int motor_init(void)
         return -1;
     }
 
-    adc_start_sample();
+    if (adc_start_sample() != 0 || motor_calibrate_current_zero() != 0) {
+        return -1;
+    }
     (void)encoder_start_sample();
     if (!encoder_is_healthy()) {
         motor_latch_fault(MOTOR_FAULT_ENCODER);
@@ -340,7 +373,6 @@ void motor_current_loop_isr(void)
 
     if ((s_aligning != 0u || s_enabled) && fabsf(s_iu) > OVERCURRENT_TRIP_A) {
         motor_latch_fault(MOTOR_FAULT_OVERCURRENT);
-        adc_start_sample();
         return;
     }
 
@@ -350,13 +382,11 @@ void motor_current_loop_isr(void)
                                sin_e, cos_e,
                                MOTOR_BUS_VOLTAGE, &du, &dv, &dw);
         pwm_set_duty(du, dv, dw);
-        adc_start_sample();
         return;
     }
 
     if (!s_enabled || s_fault != MOTOR_FAULT_NONE) {
         pwm_set_duty(0.0f, 0.0f, 0.0f);
-        adc_start_sample();
         return;
     }
 
@@ -386,7 +416,6 @@ void motor_current_loop_isr(void)
     foc_inverse_park_svpwm(vd, vq, sin_e, cos_e,
                            MOTOR_BUS_VOLTAGE, &du, &dv, &dw);
     pwm_set_duty(du, dv, dw);
-    adc_start_sample();
 }
 
 void motor_velocity_loop_isr(void)
@@ -427,6 +456,16 @@ void motor_velocity_loop_isr(void)
 void motor_adc_complete_isr(void)
 {
     uint32_t raw = HAL_ADCEx_InjectedGetValue(&hadc1, ADC_INJECTED_RANK_1);
-    float voltage = (float)raw * CURRENT_SENSE_SCALE;
-    s_iu = (voltage - CURRENT_SENSE_OFFSET_V) / CURRENT_SENSE_GAIN;
+
+    if (s_current_calibrated == 0u) {
+        if (s_current_calibration_samples < MOTOR_CURRENT_ZERO_SAMPLES) {
+            s_current_calibration_sum += raw;
+            s_current_calibration_samples++;
+        }
+        s_iu = 0.0f;
+        return;
+    }
+
+    s_iu = ((float)((int32_t)raw - (int32_t)s_current_offset_raw)
+          * CURRENT_SENSE_SCALE) / CURRENT_SENSE_GAIN;
 }
