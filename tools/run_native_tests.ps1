@@ -76,6 +76,9 @@ try {
     if ($motorSource -notmatch '(?s)void\s+motor_current_loop_isr\s*\([^)]*\).*?adc_start_sample\s*\(') {
         throw 'TIM1 current ISR must continue to request injected ADC samples'
     }
+    if ($motorSource -notmatch '(?s)#endif\s*\r?\n\s*vq\s*=\s*voltage_limiter_step') {
+        throw 'current-loop output must pass through the common voltage limiter'
+    }
 
     & gcc -std=c11 -Wall -Wextra -Werror -Isrc `
         test/native/test_main.c `

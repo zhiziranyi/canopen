@@ -431,11 +431,12 @@ void motor_current_loop_isr(void)
     vd = pid_update(&s_curr_id_pid, -id_value);
     vq = pid_update(&s_curr_iq_pid, s_current_target - iq_value);
 #else
-    vq = voltage_limiter_step(&s_voltage_limiter, s_torque_voltage, s_iu,
+    vq = s_torque_voltage;
+#endif
+    vq = voltage_limiter_step(&s_voltage_limiter, vq, s_iu,
                               VOLTAGE_LIMIT_V, CURRENT_SOFT_LIMIT_A,
                               VOLTAGE_RISE_V_PER_S / (float)FOC_LOOP_HZ,
                               VOLTAGE_FALL_V_PER_S / (float)FOC_LOOP_HZ);
-#endif
     s_vcmd = vq;
     foc_inverse_park_svpwm(vd, vq, sin_e, cos_e,
                            MOTOR_BUS_VOLTAGE, &du, &dv, &dw);
