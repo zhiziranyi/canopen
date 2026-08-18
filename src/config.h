@@ -20,7 +20,7 @@
 
 /* 电流环使能：0 = 电压型 FOC（默认，安全），1 = 电流型 FOC */
 #ifndef FOC_CURRENT_LOOP_ENABLE
-#define FOC_CURRENT_LOOP_ENABLE 0
+#define FOC_CURRENT_LOOP_ENABLE 1
 #endif
 
 /* ---------------- 控制环频率 ---------------- */
@@ -36,7 +36,7 @@
 
 /* ---------------- 限制与保护 ---------------- */
 #define VOLTAGE_LIMIT_V     3.0f       /* Ramped startup torque; 0.6 A soft and 0.8 A hard OCP remain. */
-#define CURRENT_LIMIT_A     0.6f
+#define CURRENT_LIMIT_A     0.35f       /* Current-loop target; leaves margin to 0.8 A hard OCP. */
 #define CURRENT_SOFT_LIMIT_A 0.60f      /* Proactively reduce Vq before 0.8 A hard OCP. */
 #define VOLTAGE_RISE_V_PER_S 8.0f
 #define VOLTAGE_FALL_V_PER_S 100.0f

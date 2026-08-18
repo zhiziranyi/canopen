@@ -56,6 +56,13 @@ try {
     if (-not $softCurrentMatch.Success -or [float]$softCurrentMatch.Groups[1].Value -lt 0.55 -or [float]$softCurrentMatch.Groups[1].Value -gt 0.65) {
         throw 'soft current limit must leave usable startup torque below the 0.8 A hard trip'
     }
+    if ($configSource -notmatch '(?m)^#define\s+FOC_CURRENT_LOOP_ENABLE\s+1') {
+        throw 'current feedback loop must be enabled after ADC zero calibration'
+    }
+    $currentLimitMatch = [regex]::Match($configSource, '(?m)^#define\s+CURRENT_LIMIT_A\s+([0-9.]+)f')
+    if (-not $currentLimitMatch.Success -or [float]$currentLimitMatch.Groups[1].Value -lt 0.34 -or [float]$currentLimitMatch.Groups[1].Value -gt 0.36) {
+        throw 'current-loop target must be limited to the validated 0.35 A startup value'
+    }
 
     if ($boardSource -notmatch 'ADC_INJECTED_SOFTWARE_START') {
         throw 'ADC injected conversion must use the validated software trigger'
