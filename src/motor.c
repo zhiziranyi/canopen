@@ -384,11 +384,7 @@ void motor_current_loop_isr(void)
 
     if (s_aligning != 0u) {
         fast_sin_cos(s_align_angle, &sin_e, &cos_e);
-        vd = voltage_limiter_step(&s_voltage_limiter, s_align_v, s_iu,
-                                  VOLTAGE_LIMIT_V, CURRENT_SOFT_LIMIT_A,
-                                  VOLTAGE_RISE_V_PER_S / (float)FOC_LOOP_HZ,
-                                  VOLTAGE_FALL_V_PER_S / (float)FOC_LOOP_HZ);
-        foc_inverse_park_svpwm(vd, 0.0f,
+        foc_inverse_park_svpwm(s_align_v, 0.0f,
                                sin_e, cos_e,
                                MOTOR_BUS_VOLTAGE, &du, &dv, &dw);
         pwm_set_duty(du, dv, dw);

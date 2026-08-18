@@ -22,8 +22,8 @@ try {
         throw 'motor current ISR must enforce overcurrent protection before alignment output'
     }
     $alignmentEnd = $motorSource.IndexOf('if (!s_enabled', $alignmentBranch)
-    if ($alignmentEnd -lt 0 -or $motorSource.Substring($alignmentBranch, $alignmentEnd - $alignmentBranch) -notmatch 'voltage_limiter_step') {
-        throw 'FOC alignment output must use the current-aware voltage limiter'
+    if ($alignmentEnd -lt 0 -or $motorSource.Substring($alignmentBranch, $alignmentEnd - $alignmentBranch) -match 'voltage_limiter_step') {
+        throw 'FOC alignment must use the validated fixed alignment voltage'
     }
 
     $driveTestSource = Get-Content -LiteralPath 'tools/drive_test.py' -Raw

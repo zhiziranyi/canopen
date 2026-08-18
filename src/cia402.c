@@ -25,7 +25,9 @@ static uint16_t motor_fault_error_code(motor_fault_t fault)
         case MOTOR_FAULT_ENCODER:
             return 0x7300u;
         case MOTOR_FAULT_INIT:
+            return 0xFF02u;
         case MOTOR_FAULT_CONTROL_TIMING:
+            return 0xFF01u;
         case MOTOR_FAULT_ALIGNMENT:
             return 0xFF01u;
         case MOTOR_FAULT_NONE:
