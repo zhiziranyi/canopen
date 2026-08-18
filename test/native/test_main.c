@@ -1,6 +1,7 @@
 #include "cia402_sm.h"
 #include "encoder_math.h"
 #include "foc.h"
+#include "motion_profile.h"
 #include "pid.h"
 
 #include <math.h>
@@ -131,6 +132,43 @@ static void test_cia402_fault_requires_reset_edge(void)
     CHECK_TRUE(cia402_sm_statusword(&sm) == 0x0240u);
 }
 
+static void test_motion_profile_handles_forward_reverse_and_stop(void)
+{
+    motion_profile_t profile;
+    float command;
+
+    motion_profile_init(&profile, 2000.0f, 10000.0f, 10000.0f);
+    motion_profile_set_target(&profile, 0, 1000);
+    command = motion_profile_step(&profile, 0, 0.001f);
+    CHECK_TRUE(command > 0.0f);
+    CHECK_TRUE(command <= 10.0001f);
+
+    motion_profile_init(&profile, 2000.0f, 10000.0f, 10000.0f);
+    motion_profile_set_target(&profile, 2000, 1000);
+    command = motion_profile_step(&profile, 2000, 0.001f);
+    CHECK_TRUE(command < 0.0f);
+    CHECK_TRUE(command >= -10.0001f);
+
+    motion_profile_set_target(&profile, 100, 100);
+    CHECK_NEAR(motion_profile_step(&profile, 100, 0.001f), 0.0f, 1.0e-6f);
+}
+
+static void test_motion_profile_brakes_near_target(void)
+{
+    motion_profile_t profile;
+    float far_command;
+    float near_command;
+
+    motion_profile_init(&profile, 2000.0f, 1000000.0f, 10000.0f);
+    motion_profile_set_target(&profile, 0, 10000);
+    far_command = motion_profile_step(&profile, 0, 0.1f);
+    near_command = motion_profile_step(&profile, 9990, 0.1f);
+
+    CHECK_TRUE(far_command > 0.0f);
+    CHECK_TRUE(near_command >= 0.0f);
+    CHECK_TRUE(near_command < far_command);
+}
+
 int main(void)
 {
     test_svpwm_zero_vector_is_centered();
@@ -141,6 +179,8 @@ int main(void)
     test_encoder_accumulates_and_zeros_position();
     test_cia402_standard_enable_sequence();
     test_cia402_fault_requires_reset_edge();
+    test_motion_profile_handles_forward_reverse_and_stop();
+    test_motion_profile_brakes_near_target();
 
     if (failures != 0) {
         (void)printf("native tests: FAIL (%d)\n", failures);
