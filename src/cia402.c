@@ -15,6 +15,7 @@ static uint8_t s_prev_pp_bit4 = 0u;
 static uint8_t s_prev_fault_reset_bit = 0u;
 static uint8_t s_homing_done = 0u;
 static uint8_t s_external_fault = 0u;
+static int8_t s_previous_mode = 0;
 
 static uint16_t motor_fault_error_code(motor_fault_t fault)
 {
@@ -44,6 +45,16 @@ static void apply_mode_logic(void)
     int8_t mode = OD_RAM.x6060_modesOfOperation;
     uint16_t controlword = OD_RAM.x6040_controlword;
     uint8_t pp_bit4 = (uint8_t)((controlword >> 4) & 0x01u);
+
+    if (mode != s_previous_mode) {
+        motor_stop();
+        s_homing_done = 0u;
+        s_prev_pp_bit4 = pp_bit4;
+        s_previous_mode = mode;
+        if (mode == MODE_PROFILE_VEL) {
+            OD_RAM.x60FF_targetVelocity = 0;
+        }
+    }
 
     if (!cia402_mode_supported(mode)) {
         OD_RAM.x6061_modesOfOperationDisplay = 0;
@@ -117,6 +128,7 @@ void cia402_init(void)
     s_prev_fault_reset_bit = 0u;
     s_homing_done = 0u;
     s_external_fault = 0u;
+    s_previous_mode = 0;
 
     set_error(0u);
     OD_RAM.x6040_controlword = 0u;

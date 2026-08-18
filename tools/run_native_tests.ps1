@@ -30,6 +30,14 @@ try {
         throw 'drive_test.py must add the drive as a remote CANopen node'
     }
 
+    $cia402Source = Get-Content -LiteralPath 'src/cia402.c' -Raw
+    if ($cia402Source -notmatch 'if\s*\(\s*mode\s*!=\s*s_previous_mode\s*\)') {
+        throw 'cia402.c must detect operation-mode transitions'
+    }
+    if ($cia402Source -notmatch '(?s)if\s*\(\s*mode\s*!=\s*s_previous_mode\s*\).*?motor_stop\s*\(\s*\)') {
+        throw 'cia402.c must stop stale motion commands when the mode changes'
+    }
+
     $boardSource = Get-Content -LiteralPath 'src/board.c' -Raw
     if ($boardSource -match '(?s)void\s+Error_Handler\s*\([^)]*\).*?__disable_irq\s*\(\s*\).*?HAL_Delay\s*\(') {
         throw 'Error_Handler must not call HAL_Delay after disabling SysTick interrupts'
