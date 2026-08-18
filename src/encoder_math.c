@@ -60,6 +60,20 @@ float encoder_math_velocity(const encoder_math_t* state)
     return (state != NULL) ? state->velocity : 0.0f;
 }
 
+int32_t encoder_math_directed_position(const encoder_math_t* state, int8_t direction)
+{
+    int32_t position = encoder_math_position(state);
+
+    return (direction < 0) ? -position : position;
+}
+
+float encoder_math_directed_velocity(const encoder_math_t* state, int8_t direction)
+{
+    float velocity = encoder_math_velocity(state);
+
+    return (direction < 0) ? -velocity : velocity;
+}
+
 void encoder_math_zero_position(encoder_math_t* state)
 {
     if (state != NULL) {

@@ -122,6 +122,18 @@ static void test_encoder_accumulates_and_zeros_position(void)
     CHECK_TRUE(encoder_math_position(&encoder) == 0);
 }
 
+static void test_encoder_direction_matches_foc_alignment(void)
+{
+    encoder_math_t encoder;
+
+    encoder_math_init(&encoder, 100u);
+    encoder_math_update(&encoder, 104u, 0.001f);
+    CHECK_TRUE(encoder_math_directed_position(&encoder, 1) == 4);
+    CHECK_TRUE(encoder_math_directed_position(&encoder, -1) == -4);
+    CHECK_TRUE(encoder_math_directed_velocity(&encoder, 1) > 0.0f);
+    CHECK_TRUE(encoder_math_directed_velocity(&encoder, -1) < 0.0f);
+}
+
 static void test_cia402_standard_enable_sequence(void)
 {
     cia402_sm_t sm;
@@ -209,6 +221,7 @@ int main(void)
     test_pid_saturates_and_resets();
     test_encoder_wrap_is_one_count();
     test_encoder_accumulates_and_zeros_position();
+    test_encoder_direction_matches_foc_alignment();
     test_cia402_standard_enable_sequence();
     test_cia402_fault_requires_reset_edge();
     test_cia402_supported_modes_are_explicit();

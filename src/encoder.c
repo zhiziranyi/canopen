@@ -155,7 +155,7 @@ float encoder_get_velocity(void)
     float velocity;
 
     __disable_irq();
-    velocity = encoder_math_velocity(&s_math);
+    velocity = encoder_math_directed_velocity(&s_math, s_dir);
     __set_PRIMASK(primask);
     return velocity;
 }
@@ -166,7 +166,7 @@ int32_t encoder_get_position(void)
     int32_t position;
 
     __disable_irq();
-    position = encoder_math_position(&s_math);
+    position = encoder_math_directed_position(&s_math, s_dir);
     __set_PRIMASK(primask);
     return position;
 }
