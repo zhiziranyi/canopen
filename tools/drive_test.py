@@ -51,7 +51,7 @@ def build_network(canopen_module, args):
 
 
 def add_node(network, args):
-    node = network.create_node(args.node, args.eds)
+    node = network.add_node(args.node, args.eds)
     node.nmt.state = "OPERATIONAL"
     return node
 

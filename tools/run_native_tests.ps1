@@ -16,6 +16,14 @@ try {
         throw 'motor.c must explicitly start the TIM1 update interrupt'
     }
 
+    $driveTestSource = Get-Content -LiteralPath 'tools/drive_test.py' -Raw
+    if ($driveTestSource -match 'network\.create_node\s*\(') {
+        throw 'drive_test.py must not create a local CANopen node for the remote drive'
+    }
+    if ($driveTestSource -notmatch 'network\.add_node\s*\(') {
+        throw 'drive_test.py must add the drive as a remote CANopen node'
+    }
+
     & gcc -std=c11 -Wall -Wextra -Werror -Isrc `
         test/native/test_main.c `
         src/foc.c `
