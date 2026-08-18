@@ -42,6 +42,7 @@
 #define VOLTAGE_FALL_V_PER_S 100.0f
 #define VELOCITY_LIMIT_CPS  50000.0f   /* counts/s，约 12 rev/s */
 #define OVERCURRENT_TRIP_A  0.8f
+#define OVERCURRENT_CONFIRM_SAMPLES 8u
 
 /* FOC 上电对齐校准 */
 #define FOC_ALIGN_VOLTAGE   1.0f     /* 校准电压 (V) */

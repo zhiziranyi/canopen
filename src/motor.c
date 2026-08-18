@@ -37,6 +37,7 @@ static volatile uint16_t s_current_offset_raw = 2048u;
 static volatile uint16_t s_current_calibration_samples = 0u;
 static volatile uint32_t s_current_calibration_sum = 0u;
 static volatile uint8_t s_current_calibrated = 0u;
+static volatile uint8_t s_overcurrent_samples = 0u;
 
 static pid_t s_curr_id_pid;
 static pid_t s_curr_iq_pid;
@@ -83,6 +84,7 @@ static void motor_latch_fault(motor_fault_t fault)
     s_torque_voltage = 0.0f;
     s_current_target = 0.0f;
     s_velocity_cmd = 0.0f;
+    s_overcurrent_samples = 0u;
     voltage_limiter_init(&s_voltage_limiter);
     pwm_set_duty(0.0f, 0.0f, 0.0f);
     HAL_GPIO_WritePin(PIN_DRV_EN_GPIO, PIN_DRV_EN_PIN, GPIO_PIN_RESET);
@@ -137,6 +139,7 @@ int motor_init(void)
     s_current_calibration_samples = 0u;
     s_current_calibration_sum = 0u;
     s_current_calibrated = 0u;
+    s_overcurrent_samples = 0u;
     voltage_limiter_init(&s_voltage_limiter);
     HAL_GPIO_WritePin(PIN_DRV_EN_GPIO, PIN_DRV_EN_PIN, GPIO_PIN_RESET);
     pwm_set_duty(0.0f, 0.0f, 0.0f);
@@ -242,6 +245,7 @@ void motor_enable(void)
     s_torque_voltage = 0.0f;
     s_current_target = 0.0f;
     s_velocity_cmd = 0.0f;
+    s_overcurrent_samples = 0u;
     voltage_limiter_init(&s_voltage_limiter);
     HAL_GPIO_WritePin(PIN_DRV_EN_GPIO, PIN_DRV_EN_PIN, GPIO_PIN_SET);
     s_enabled = 1;
@@ -254,6 +258,7 @@ void motor_disable(void)
     s_current_target = 0.0f;
     s_velocity_cmd = 0.0f;
     s_position_mode = 0;
+    s_overcurrent_samples = 0u;
     voltage_limiter_init(&s_voltage_limiter);
     motion_profile_stop(&s_position_profile);
     pwm_set_duty(0.0f, 0.0f, 0.0f);
@@ -376,10 +381,18 @@ void motor_current_loop_isr(void)
 
     s_control_update_count++;
 
-    if ((s_aligning != 0u || s_enabled) && fabsf(s_iu) > OVERCURRENT_TRIP_A) {
-        motor_latch_fault(MOTOR_FAULT_OVERCURRENT);
-        (void)adc_start_sample();
-        return;
+    if (s_aligning != 0u || s_enabled) {
+        if (fabsf(s_iu) > OVERCURRENT_TRIP_A) {
+            if (s_overcurrent_samples < OVERCURRENT_CONFIRM_SAMPLES) {
+                s_overcurrent_samples++;
+            } else {
+                motor_latch_fault(MOTOR_FAULT_OVERCURRENT);
+                (void)adc_start_sample();
+                return;
+            }
+        } else {
+            s_overcurrent_samples = 0u;
+        }
     }
 
     if (s_aligning != 0u) {

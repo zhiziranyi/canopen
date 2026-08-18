@@ -63,6 +63,9 @@ try {
     if (-not $currentLimitMatch.Success -or [float]$currentLimitMatch.Groups[1].Value -lt 0.34 -or [float]$currentLimitMatch.Groups[1].Value -gt 0.36) {
         throw 'current-loop target must be limited to the validated 0.35 A startup value'
     }
+    if ($configSource -notmatch '(?m)^#define\s+OVERCURRENT_CONFIRM_SAMPLES\s+8') {
+        throw 'overcurrent protection must reject only sustained samples, not one startup spike'
+    }
 
     if ($boardSource -notmatch 'ADC_INJECTED_SOFTWARE_START') {
         throw 'ADC injected conversion must use the validated software trigger'
