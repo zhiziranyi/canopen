@@ -1,5 +1,6 @@
 #include "cia402_sm.h"
 #include "encoder_math.h"
+#include "fast_trig.h"
 #include "foc.h"
 #include "motion_profile.h"
 #include "pid.h"
@@ -64,6 +65,26 @@ static void test_clarke_park_d_axis(void)
 
     CHECK_NEAR(id, 1.0f, 1.0e-5f);
     CHECK_NEAR(iq, 0.0f, 1.0e-5f);
+}
+
+static void test_fast_sin_cos_tracks_unit_circle(void)
+{
+    static const float angles[] = {
+        -6.28318531f, -4.71238898f, -3.14159265f, -1.57079633f,
+        -0.78539816f, 0.0f, 0.78539816f, 1.57079633f,
+        3.14159265f, 4.71238898f, 6.28318531f
+    };
+    size_t index;
+
+    for (index = 0u; index < sizeof(angles) / sizeof(angles[0]); ++index) {
+        float sin_value;
+        float cos_value;
+
+        fast_sin_cos(angles[index], &sin_value, &cos_value);
+        CHECK_NEAR(sin_value, sinf(angles[index]), 0.002f);
+        CHECK_NEAR(cos_value, cosf(angles[index]), 0.002f);
+        CHECK_NEAR(sin_value * sin_value + cos_value * cos_value, 1.0f, 0.004f);
+    }
 }
 
 static void test_pid_saturates_and_resets(void)
@@ -184,6 +205,7 @@ int main(void)
     test_svpwm_zero_vector_is_centered();
     test_svpwm_outputs_are_bounded();
     test_clarke_park_d_axis();
+    test_fast_sin_cos_tracks_unit_circle();
     test_pid_saturates_and_resets();
     test_encoder_wrap_is_one_count();
     test_encoder_accumulates_and_zeros_position();

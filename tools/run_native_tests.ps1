@@ -46,6 +46,7 @@ try {
     & gcc -std=c11 -Wall -Wextra -Werror -Isrc `
         test/native/test_main.c `
         src/foc.c `
+        src/fast_trig.c `
         src/pid.c `
         src/encoder_math.c `
         src/cia402_sm.c `

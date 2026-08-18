@@ -3,6 +3,7 @@
 #include "board.h"
 #include "config.h"
 #include "encoder.h"
+#include "fast_trig.h"
 #include "foc.h"
 #include "motion_profile.h"
 #include "pid.h"
@@ -344,8 +345,9 @@ void motor_current_loop_isr(void)
     }
 
     if (s_aligning != 0u) {
+        fast_sin_cos(s_align_angle, &sin_e, &cos_e);
         foc_inverse_park_svpwm(s_align_v, 0.0f,
-                               sinf(s_align_angle), cosf(s_align_angle),
+                               sin_e, cos_e,
                                MOTOR_BUS_VOLTAGE, &du, &dv, &dw);
         pwm_set_duty(du, dv, dw);
         adc_start_sample();
@@ -369,8 +371,7 @@ void motor_current_loop_isr(void)
     foc_reconstruct_currents(ia, du, dv, dw, &ib, &ic);
 
     electrical_angle = encoder_get_elec_angle_rad();
-    sin_e = sinf(electrical_angle);
-    cos_e = cosf(electrical_angle);
+    fast_sin_cos(electrical_angle, &sin_e, &cos_e);
     foc_clarke_park(ia, ib, ic, sin_e, cos_e, &id_value, &iq_value);
     s_id = id_value;
     s_iq = iq_value;
