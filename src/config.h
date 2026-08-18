@@ -20,7 +20,7 @@
 
 /* 电流环使能：0 = 电压型 FOC（默认，安全），1 = 电流型 FOC */
 #ifndef FOC_CURRENT_LOOP_ENABLE
-#define FOC_CURRENT_LOOP_ENABLE 1
+#define FOC_CURRENT_LOOP_ENABLE 0
 #endif
 
 /* ---------------- 控制环频率 ---------------- */
