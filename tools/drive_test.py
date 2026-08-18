@@ -1,159 +1,213 @@
 #!/usr/bin/env python3
-"""
-CANopen CiA402 FOC 伺服驱动 - 上位机测试脚本
-
-依赖: pip install python-can canopen pyserial
-
-示例 (USB-CAN 工具 slcan 固件, COM7):
-  python drive_test.py --port COM7 --cmd info
-  python drive_test.py --port COM7 --cmd mode --value 3
-  python drive_test.py --port COM7 --cmd enable
-  python drive_test.py --port COM7 --cmd pos --value 4096
-  python drive_test.py --port COM7 --cmd vel --value 5000
-  python drive_test.py --port COM7 --cmd disable
-
-接口切换: --interface gs_usb / pcan / socketcan / slcan
-"""
+"""CANopen CiA402 drive acceptance tool for node 1 at 1 Mbps."""
 
 import argparse
+from pathlib import Path
+import sys
 import time
 
-import canopen
+
+STATUS_MASK = 0x006F
+STATUS_SWITCH_ON_DISABLED = 0x0040
+STATUS_READY_TO_SWITCH_ON = 0x0021
+STATUS_SWITCHED_ON = 0x0023
+STATUS_OPERATION_ENABLED = 0x0027
 
 
-def build_network(args):
-    net = canopen.Network()
-    kwargs = {}
-    if args.interface == "slcan":
-        kwargs["channel"] = args.port
-        kwargs["bitrate"] = 1000000
-    elif args.interface == "gs_usb":
-        kwargs["channel"] = 0
-        kwargs["bitrate"] = 1000000
-    elif args.interface == "pcan":
-        kwargs["channel"] = args.port
-        kwargs["bitrate"] = 1000000
-    else:
-        kwargs["channel"] = args.port
-        kwargs["bitrate"] = 1000000
-    net.connect(interface=args.interface, **kwargs)
-    return net
+def parse_args():
+    epilog = """PcanView/raw SDO examples for node 1 (request COB-ID 0x601):
+  read  6041h: 40 41 60 00 00 00 00 00
+  write 6040h=0006h: 2B 40 60 00 06 00 00 00
+  write 6040h=0007h: 2B 40 60 00 07 00 00 00
+  write 6040h=000Fh: 2B 40 60 00 0F 00 00 00
+  write 6060h=03h:   2F 60 60 00 03 00 00 00
+Responses use COB-ID 0x581. Send NMT start on COB-ID 0x000 with data 01 01.
+"""
+    parser = argparse.ArgumentParser(
+        description="CANopen servo: status, standard enable, motion and disable",
+        epilog=epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--interface", default="slcan",
+                        choices=["slcan", "gs_usb", "pcan", "socketcan"])
+    parser.add_argument("--port", default="COM7",
+                        help="channel: COM7, PCAN_USBBUS1, can0, or gs_usb index")
+    parser.add_argument("--node", type=int, default=1)
+    parser.add_argument("--eds", default=str(Path(__file__).with_name("drive.eds")))
+    parser.add_argument("--timeout", type=float, default=3.0)
+    parser.add_argument("--cmd", required=True,
+                        choices=["info", "status", "enable", "disable",
+                                 "mode", "pos", "vel", "monitor"])
+    parser.add_argument("--value", type=int, default=0)
+    parser.add_argument("--seconds", type=float, default=5.0)
+    return parser.parse_args()
 
 
-def add_node(net, args):
-    node = net.create_node(args.node, args.eds)
+def build_network(canopen_module, args):
+    network = canopen_module.Network()
+    channel = 0 if args.interface == "gs_usb" and args.port == "COM7" else args.port
+    network.connect(interface=args.interface, channel=channel, bitrate=1_000_000)
+    return network
+
+
+def add_node(network, args):
+    node = network.create_node(args.node, args.eds)
     node.nmt.state = "OPERATIONAL"
     return node
 
 
-def wait_ready(node, timeout=3.0):
-    t0 = time.time()
-    while time.time() - t0 < timeout:
+def read_status(node):
+    return int(node.sdo[0x6041].raw)
+
+
+def read_error(node):
+    try:
+        return int(node.sdo[0x603F].raw)
+    except Exception:
+        return 0xFFFF
+
+
+def wait_status(node, expected, label, timeout):
+    deadline = time.monotonic() + timeout
+    last_status = 0
+    last_exception = None
+    while time.monotonic() < deadline:
         try:
-            node.sdo[0x6041].read()
+            last_status = read_status(node)
+            if (last_status & STATUS_MASK) == expected:
+                print(f"{label}: statusword=0x{last_status:04X}")
+                return last_status
+        except Exception as exc:  # hardware backends expose different exception types
+            last_exception = exc
+        time.sleep(0.05)
+    detail = f", last transport error={last_exception}" if last_exception else ""
+    raise RuntimeError(
+        f"timeout waiting for {label}: statusword=0x{last_status:04X}, "
+        f"error=0x{read_error(node):04X}{detail}"
+    )
+
+
+def wait_ready(node, timeout):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            status = read_status(node)
+            print(f"node responding: statusword=0x{status:04X}")
             return
         except Exception:
             time.sleep(0.1)
-    raise RuntimeError("node not responding")
+    raise RuntimeError("node did not answer SDO requests")
 
 
 def cmd_info(node):
     try:
         name = node.sdo[0x1008].read().decode(errors="ignore")
-        print("Device:", name)
     except Exception:
-        print("Device: (本固件未提供 0x1008 设备名)")
+        name = "(0x1008 unavailable)"
     identity = node.sdo[0x1018]
-    print("Vendor : 0x%08X" % identity[1].raw)
-    print("Product: 0x%08X" % identity[2].raw)
-    print("Revision: 0x%08X" % identity[3].raw)
-    print("Heartbeat: %d ms" % node.sdo[0x1017].raw)
+    print("Device   :", name)
+    print(f"Vendor   : 0x{identity[1].raw:08X}")
+    print(f"Product  : 0x{identity[2].raw:08X}")
+    print(f"Revision : 0x{identity[3].raw:08X}")
+    print(f"Heartbeat: {node.sdo[0x1017].raw} ms")
+    cmd_status(node)
 
 
-def cmd_enable(node):
-    node.sdo[0x6040].raw = 0x06   # shutdown
-    time.sleep(0.05)
-    node.sdo[0x6040].raw = 0x07   # switch on
-    time.sleep(0.05)
-    node.sdo[0x6040].raw = 0x0F   # enable operation
-    sw = node.sdo[0x6041].raw
-    print("Enabled, statusword=0x%04X" % sw)
+def cmd_status(node):
+    print(f"Statusword: 0x{read_status(node):04X}")
+    print(f"Controlword: 0x{int(node.sdo[0x6040].raw):04X}")
+    print(f"Mode: {int(node.sdo[0x6061].raw)}")
+    print(f"Position: {int(node.sdo[0x6064].raw)} counts")
+    print(f"Velocity: {int(node.sdo[0x606C].raw)} counts/s")
+    print(f"Error: 0x{read_error(node):04X}")
 
 
-def cmd_disable(node):
-    node.sdo[0x6040].raw = 0x07
-    print("Disabled")
+def cmd_enable(node, timeout):
+    sequence = (
+        (0x0006, STATUS_READY_TO_SWITCH_ON, "ready-to-switch-on"),
+        (0x0007, STATUS_SWITCHED_ON, "switched-on"),
+        (0x000F, STATUS_OPERATION_ENABLED, "operation-enabled"),
+    )
+    for controlword, expected, label in sequence:
+        node.sdo[0x6040].raw = controlword
+        wait_status(node, expected, label, timeout)
+
+
+def cmd_disable(node, timeout):
+    node.sdo[0x60FF].raw = 0
+    node.sdo[0x6040].raw = 0
+    wait_status(node, STATUS_SWITCH_ON_DISABLED, "switch-on-disabled", timeout)
 
 
 def cmd_mode(node, value):
+    if value not in (1, 3, 6):
+        raise ValueError("supported modes are 1 (PP), 3 (PV), and 6 (HM)")
     node.sdo[0x6060].raw = value
-    print("Modes of operation -> %d" % value)
+    print(f"Modes of operation -> {value}")
 
 
-def cmd_pos(node, value):
+def cmd_position(node, value, timeout):
+    cmd_mode(node, 1)
+    cmd_enable(node, timeout)
     node.sdo[0x607A].raw = value
-    cw = node.sdo[0x6040].raw
-    cw |= 0x10            # new set point
-    node.sdo[0x6040].raw = cw
+    node.sdo[0x6040].raw = 0x001F
     time.sleep(0.05)
-    cw &= ~0x10
-    node.sdo[0x6040].raw = cw
-    print("Target position -> %d" % value)
+    node.sdo[0x6040].raw = 0x000F
+    print(f"Target position -> {value} counts")
 
 
-def cmd_vel(node, value):
+def cmd_velocity(node, value, timeout):
+    cmd_mode(node, 3)
+    cmd_enable(node, timeout)
     node.sdo[0x60FF].raw = value
-    print("Target velocity -> %d" % value)
+    print(f"Target velocity -> {value} counts/s")
 
 
 def cmd_monitor(node, seconds):
-    print("time(s)  status   pos   vel")
-    t0 = time.time()
-    while time.time() - t0 < seconds:
-        try:
-            sw = node.sdo[0x6041].raw
-            pos = node.sdo[0x6064].raw
-            vel = node.sdo[0x606C].raw
-            print("%5.1f  0x%04X  %7d %8d" % (time.time() - t0, sw, pos, vel))
-        except Exception:
-            print("(read error)")
+    print("time(s)  status  error   position  velocity")
+    start = time.monotonic()
+    while time.monotonic() - start < seconds:
+        status = read_status(node)
+        error = read_error(node)
+        position = int(node.sdo[0x6064].raw)
+        velocity = int(node.sdo[0x606C].raw)
+        print(f"{time.monotonic() - start:6.2f}  0x{status:04X}  0x{error:04X}  "
+              f"{position:9d}  {velocity:8d}")
         time.sleep(0.2)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="CANopen servo drive test tool")
-    parser.add_argument("--interface", default="slcan",
-                        choices=["slcan", "gs_usb", "pcan", "socketcan"])
-    parser.add_argument("--port", default="COM7", help="serial port or channel")
-    parser.add_argument("--node", type=int, default=1)
-    parser.add_argument("--eds", default="drive.eds")
-    parser.add_argument("--cmd", required=True,
-                        choices=["info", "enable", "disable", "mode", "pos", "vel", "monitor"])
-    parser.add_argument("--value", type=int, default=0)
-    parser.add_argument("--seconds", type=float, default=5.0)
-    args = parser.parse_args()
-
-    net = build_network(args)
+    args = parse_args()
     try:
-        node = add_node(net, args)
-        wait_ready(node)
+        import canopen
+    except ModuleNotFoundError:
+        print("Missing dependency. Run: pip install python-can canopen pyserial", file=sys.stderr)
+        return 2
+
+    network = build_network(canopen, args)
+    try:
+        node = add_node(network, args)
+        wait_ready(node, args.timeout)
         if args.cmd == "info":
             cmd_info(node)
+        elif args.cmd == "status":
+            cmd_status(node)
         elif args.cmd == "enable":
-            cmd_enable(node)
+            cmd_enable(node, args.timeout)
         elif args.cmd == "disable":
-            cmd_disable(node)
+            cmd_disable(node, args.timeout)
         elif args.cmd == "mode":
             cmd_mode(node, args.value)
         elif args.cmd == "pos":
-            cmd_pos(node, args.value)
+            cmd_position(node, args.value, args.timeout)
         elif args.cmd == "vel":
-            cmd_vel(node, args.value)
+            cmd_velocity(node, args.value, args.timeout)
         elif args.cmd == "monitor":
             cmd_monitor(node, args.seconds)
     finally:
-        net.disconnect()
+        network.disconnect()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -30,3 +30,11 @@ void canopen_timer_isr(void)
 {
     canopen_app_interrupt();
 }
+
+uint32_t app_canopen_error_status(void)
+{
+    if (CO == NULL || CO->CANmodule == NULL) {
+        return 0u;
+    }
+    return CO->CANmodule->CANerrorStatus;
+}

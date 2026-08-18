@@ -56,6 +56,14 @@ pio run                 # 编译
 pio run -t upload       # ST-Link 烧录
 ```
 
+本项目实际配置为 STM32 ROM 串口下载：`upload_protocol = serial`、`upload_port = COM3`。下载时将 BOOT0 置 1 后复位，执行 `pio run -t upload`；完成后将 BOOT0 置 0 并复位运行。
+
+交付前还会运行不依赖硬件的控制算法测试：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/run_native_tests.ps1
+```
+
 晶振频率：`platformio.ini` 中 `HSE_VALUE=8000000`（8MHz，与 cheji407 板一致）。若 HSE 起振失败，程序会自动回退到内部 HSI 16MHz。
 
 ## CANopen 通信参数
@@ -100,7 +108,7 @@ pio run -t upload       # ST-Link 烧录
                │ 目标位置/速度
 ┌──────────────▼──────────────────────────────────┐
 │       1kHz 速度/位置环 (TIM7 中断)               │
-│   AS5600 读角 + 差分测速 -> 位置P -> 速度PI -> Vq │
+│   消费AS5600缓存 + 差分测速 -> 运动规划 -> 速度PI │
 └──────────────┬──────────────────────────────────┘
                │ Vq / Iq*
 ┌──────────────▼──────────────────────────────────┐
@@ -111,6 +119,9 @@ pio run -t upload       # ST-Link 烧录
 ```
 
 - 默认电压型 FOC（`FOC_CURRENT_LOOP_ENABLE=0`）：速度环直接输出 Vq，电流采样用于监控与过流保护，适合首次上电调试。
+- TIM1 使用普通 PWM 启动并单独开启更新中断；中心对齐模式每个完整 PWM 周期只执行一次 20kHz FOC。
+- AS5600 运行期使用 I2C 中断采样，TIM7 ISR 不再执行最长 50ms 的阻塞式 I2C 读取。
+- FOC 对齐会检查 TIM1 更新计数、编码器健康状态和转子实际位移；任一条件失败都会关闭 EN 并进入故障，不再打印假成功。
 - 电流型 FOC（`FOC_CURRENT_LOOP_ENABLE=1`）：速度环输出 Iq 目标，20kHz 电流环 PI 输出 Vd/Vq。需先标定 INA240 零点。
 - 单相电流重构：仅采样 U 相，按 B/C 相占空比分配估算另两相，低速/低占空比下精度有限，属成本优化方案。
 - 未使用 FreeRTOS：CANopenNode 本身非阻塞可裸机运行（1ms 定时器 + 主循环），避免 RTOS 移植复杂度。
@@ -120,20 +131,37 @@ pio run -t upload       # ST-Link 烧录
 ```bash
 pip install python-can canopen pyserial
 python tools/drive_test.py --port COM7 --cmd enable   # slcan 接口（USB-CAN 工具）
-python tools/drive_test.py --port COM7 --cmd mode --value 3
 python tools/drive_test.py --port COM7 --cmd vel --value 5000
+python tools/drive_test.py --port COM7 --cmd status
+python tools/drive_test.py --port COM7 --cmd disable
 ```
 
 接口类型可用 `--interface gs_usb / pcan / socketcan` 切换，取决于 USB-CAN 工具固件。
+
+### PcanView / VIEW 手工帧
+
+节点 1 的 SDO 请求 COB-ID 为 `0x601`，响应 COB-ID 为 `0x581`。先在 COB-ID `0x000` 发送 NMT Start 数据 `01 01`，再依次发送：
+
+| 操作 | 0x601 数据（8 bytes） |
+|---|---|
+| 读状态字 6041h | `40 41 60 00 00 00 00 00` |
+| Shutdown 6040h=0006h | `2B 40 60 00 06 00 00 00` |
+| Switch on 6040h=0007h | `2B 40 60 00 07 00 00 00` |
+| Enable operation 6040h=000Fh | `2B 40 60 00 0F 00 00 00` |
+| 速度模式 6060h=03h | `2F 60 60 00 03 00 00 00` |
+| 目标速度 60FFh=1000 | `23 FF 60 00 E8 03 00 00` |
+
+`C:\Users\13957\Desktop\固件源码工具\view\PcanView.exe` 是 PEAK PcanView；它通常要求 PCAN 兼容适配器。若 UCC-T01 无法被它识别，应使用适配器附带的 VIEW/串口 CAN 软件发送同样的标准帧。
 
 ## 首次上电调试步骤
 
 1. 烧录固件，串口观察启动信息与 AS5600 是否识别。
 2. CAN 工具读 0x1008/0x1018 确认节点上线，观察 Heartbeat。
 3. 空载手转电机，读 6064h 确认编码器计数连续变化、方向正确。
-4. 发送控制字 0x06 -> 0x07 -> 0x0F 使能，速度模式给小目标（如 60FFh=1000）验证转向。
-5. 速度环 PID 从极小增益开始整定，再切位置模式调位置 P。
-6. 电流模式需先确认 INA240 零电流输出电压（应约 1.65V），必要时在 `config.h` 调整 `CURRENT_SENSE_OFFSET_V`。
+4. 发送控制字 0x06 -> 0x07 -> 0x0F，每步读 6041h，预期基础状态依次为 0x0231、0x0233、0x0237。
+5. 设置 6060h=3，再给小目标（如 60FFh=1000）验证转向；测试完成先写 60FFh=0，再写 6040h=0 禁用。
+6. 速度环 PID 从极小增益开始整定，再切位置模式调位置 P。
+7. 电流模式需先确认 INA240 零电流输出电压（应约 1.65V），必要时在 `config.h` 调整 `CURRENT_SENSE_OFFSET_V`。
 
 ## 参考项目
 

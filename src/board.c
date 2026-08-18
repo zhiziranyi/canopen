@@ -14,6 +14,7 @@ TIM_HandleTypeDef htim7;
 ADC_HandleTypeDef hadc1;
 I2C_HandleTypeDef hi2c1;
 UART_HandleTypeDef huart1;
+static IWDG_HandleTypeDef hiwdg;
 
 static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
@@ -518,6 +519,22 @@ void CAN1_SCE_IRQHandler(void)
 void ADC_IRQHandler(void)
 {
     HAL_ADC_IRQHandler(&hadc1);
+}
+
+void board_watchdog_init(void)
+{
+    /* LSI 约 32 kHz：32 kHz / 64，750 ticks ≈ 1.5 s。 */
+    hiwdg.Instance = IWDG;
+    hiwdg.Init.Prescaler = IWDG_PRESCALER_64;
+    hiwdg.Init.Reload = 749u;
+    if (HAL_IWDG_Init(&hiwdg) != HAL_OK) {
+        Error_Handler();
+    }
+}
+
+void board_watchdog_refresh(void)
+{
+    (void)HAL_IWDG_Refresh(&hiwdg);
 }
 
 void I2C1_EV_IRQHandler(void)

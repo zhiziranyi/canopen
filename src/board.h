@@ -72,6 +72,8 @@ void SystemClock_Config(void);
 void board_init(void);
 void MX_CAN_Init(void);
 void Error_Handler(void);
+void board_watchdog_init(void);
+void board_watchdog_refresh(void);
 
 /* 调试打印 */
 void dbg_printf(const char* fmt, ...);

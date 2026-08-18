@@ -5,6 +5,9 @@
 #ifndef CANOPEN_APP_H
 #define CANOPEN_APP_H
 
+#include <stdint.h>
+
 void app_canopen_init(void);
+uint32_t app_canopen_error_status(void);
 
 #endif /* CANOPEN_APP_H */

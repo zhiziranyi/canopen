@@ -66,7 +66,9 @@ static void tft_status_update(void)
 {
     char buf[24];
     uint16_t sw = OD_RAM.x6041_statusword;
+    int32_t iq_ma = (int32_t)(motor_get_current_iq() * 1000.0f);
 
+    s_enc_ok = encoder_is_healthy();
     tft_value(20, s_enc_ok ? COLOR_GREEN : COLOR_RED, s_enc_ok ? "OK" : "WARN");
 
     /* 驱动状态按状态字判定（错误寄存器会包含无总线时的通讯错误位，不代表真实故障） */
@@ -89,8 +91,8 @@ static void tft_status_update(void)
     snprintf(buf, sizeof(buf), "%ld", (long)motor_get_velocity());
     tft_value(124, COLOR_WHITE, buf);
 
-    snprintf(buf, sizeof(buf), "%.3fA", (double)motor_get_current_iq());
-    tft_value(144, (motor_get_current_iq() > 0.5f) ? COLOR_RED : COLOR_GREEN, buf);
+    snprintf(buf, sizeof(buf), "%ldmA", (long)iq_ma);
+    tft_value(144, (iq_ma > 500 || iq_ma < -500) ? COLOR_RED : COLOR_GREEN, buf);
 
     snprintf(buf, sizeof(buf), "0x%04X", (unsigned)OD_RAM.x603F_errorCode);
     tft_value(164, (OD_RAM.x603F_errorCode != 0u) ? COLOR_RED : COLOR_WHITE, buf);
@@ -149,6 +151,7 @@ int main(void)
 
     app_canopen_init();
     cia402_init();
+    board_watchdog_init();
 
     dbg_printf("[OK] CANopen node started, waiting for NMT/controlword...\r\n");
     tft_status_update();
@@ -156,6 +159,9 @@ int main(void)
     uint32_t last_sync = 0;
     uint32_t last_hb = 0;
     uint32_t last_led = 0;
+    uint32_t last_watchdog = HAL_GetTick();
+    uint32_t previous_control_updates = motor_get_control_update_count();
+    uint32_t previous_velocity_ticks = motor_get_velocity_tick_count();
     uint8_t led_state = 0;
     while (1) {
         canopen_app_process();
@@ -166,14 +172,38 @@ int main(void)
             last_sync = now;
             sync_od_to_motor();
         }
+        if (now - last_watchdog >= 100u) {
+            uint32_t control_updates = motor_get_control_update_count();
+            uint32_t velocity_ticks = motor_get_velocity_tick_count();
+            last_watchdog = now;
+            if (control_updates != previous_control_updates
+                && velocity_ticks != previous_velocity_ticks) {
+                board_watchdog_refresh();
+            }
+            previous_control_updates = control_updates;
+            previous_velocity_ticks = velocity_ticks;
+        }
         /* 每秒心跳：用于确认串口与固件正常运行 */
         if (now - last_hb >= 1000) {
             last_hb = now;
-            dbg_printf("[T] sw=0x%04X pos=%ld vel=%ld iq=%.3fA\r\n",
+            int32_t iq_ma = (int32_t)(motor_get_current_iq() * 1000.0f);
+            int32_t iu_ma = (int32_t)(motor_get_current_u() * 1000.0f);
+            int32_t vq_mv = (int32_t)(motor_get_voltage_cmd() * 1000.0f);
+            dbg_printf("[T] sw=%04X cw=%04X mode=%d tgt=%ld pos=%ld vel=%ld "
+                       "vq=%ldmV iu=%ldmA iq=%ldmA fault=%d ctrl=%lu encErr=%lu canErr=%08lX\r\n",
                        (unsigned)OD_RAM.x6041_statusword,
+                       (unsigned)OD_RAM.x6040_controlword,
+                       (int)OD_RAM.x6061_modesOfOperationDisplay,
+                       (long)OD_RAM.x60FF_targetVelocity,
                        (long)motor_get_position(),
                        (long)motor_get_velocity(),
-                       (double)motor_get_current_iq());
+                       (long)vq_mv,
+                       (long)iu_ma,
+                       (long)iq_ma,
+                       (int)motor_get_fault(),
+                       (unsigned long)motor_get_control_update_count(),
+                       (unsigned long)encoder_get_error_count(),
+                       (unsigned long)app_canopen_error_status());
             tft_status_update();
         }
         /* 板载 LED 500ms 翻转：固件运行指示（不依赖串口） */
