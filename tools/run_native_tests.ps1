@@ -21,6 +21,10 @@ try {
     if ($currentLoopStart -lt 0 -or $alignmentBranch -lt 0 -or $overcurrentCheck -lt $currentLoopStart -or $overcurrentCheck -gt $alignmentBranch) {
         throw 'motor current ISR must enforce overcurrent protection before alignment output'
     }
+    $alignmentEnd = $motorSource.IndexOf('if (!s_enabled', $alignmentBranch)
+    if ($alignmentEnd -lt 0 -or $motorSource.Substring($alignmentBranch, $alignmentEnd - $alignmentBranch) -notmatch 'voltage_limiter_step') {
+        throw 'FOC alignment output must use the current-aware voltage limiter'
+    }
 
     $driveTestSource = Get-Content -LiteralPath 'tools/drive_test.py' -Raw
     if ($driveTestSource -match 'network\.create_node\s*\(') {
