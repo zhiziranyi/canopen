@@ -3,6 +3,7 @@
  * @brief   STM32F407 板级初始化：时钟、GPIO、USART、CAN、TIM、ADC、I2C
  */
 #include "board.h"
+#include "encoder.h"
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -393,6 +394,11 @@ static void MX_I2C1_Init(void)
     if (HAL_I2C_Init(&hi2c1) != HAL_OK) {
         Error_Handler();
     }
+
+    HAL_NVIC_SetPriority(I2C1_EV_IRQn, 3, 0);
+    HAL_NVIC_EnableIRQ(I2C1_EV_IRQn);
+    HAL_NVIC_SetPriority(I2C1_ER_IRQn, 3, 0);
+    HAL_NVIC_EnableIRQ(I2C1_ER_IRQn);
 }
 
 /* ========================================================================
@@ -513,6 +519,16 @@ void ADC_IRQHandler(void)
     HAL_ADC_IRQHandler(&hadc1);
 }
 
+void I2C1_EV_IRQHandler(void)
+{
+    HAL_I2C_EV_IRQHandler(&hi2c1);
+}
+
+void I2C1_ER_IRQHandler(void)
+{
+    HAL_I2C_ER_IRQHandler(&hi2c1);
+}
+
 /* ========================================================================
  * HAL 弱回调分发
  * ===================================================================== */
@@ -531,6 +547,20 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
     if (hadc->Instance == ADC1) {
         motor_adc_complete_isr();
+    }
+}
+
+void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef* hi2c)
+{
+    if (hi2c->Instance == I2C1) {
+        encoder_sample_complete_isr();
+    }
+}
+
+void HAL_I2C_ErrorCallback(I2C_HandleTypeDef* hi2c)
+{
+    if (hi2c->Instance == I2C1) {
+        encoder_sample_error_isr();
     }
 }
 
