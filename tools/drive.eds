@@ -1,0 +1,463 @@
+; CiA402 FOC 伺服驱动 EDS
+[FileInfo]
+FileName=drive.eds
+FileVersion=1
+FileRevision=0
+EDSVersion=4.0
+Description=CANopen CiA402 FOC Servo Drive (STM32F407ZGT6)
+CreationTime=12:00AM
+CreationDate=08-04-2026
+CreatedBy=Codex
+ModificationTime=12:00AM
+ModificationDate=08-04-2026
+ModifiedBy=Codex
+
+[DeviceInfo]
+VendorName=Codex
+ProductName=CiA402 FOC Servo
+ProductNumber=1
+RevisionNumber=1
+OrderCode=SRV-402-01
+BaudRate_10=0
+BaudRate_20=0
+BaudRate_50=0
+BaudRate_125=0
+BaudRate_250=0
+BaudRate_500=0
+BaudRate_800=0
+BaudRate_1000=1
+SimpleBootUpMaster=0
+SimpleBootUpSlave=0
+Granularity=8
+DynamicChannelsSupported=0
+GroupMessaging=0
+NrOfRXPDO=4
+NrOfTXPDO=4
+LSS_Supported=0
+
+[DummyUsage]
+Dummy0001=0
+Dummy0002=0
+Dummy0003=0
+Dummy0004=0
+Dummy0005=0
+Dummy0006=0
+Dummy0007=0
+
+[Comments]
+Comments=Node ID default 0x01, 1 Mbps
+
+[MandatoryObjects]
+1000h
+1001h
+1018h
+
+[OptionalObjects]
+1003h
+1005h
+1006h
+1007h
+1010h
+1011h
+1012h
+1014h
+1015h
+1016h
+1017h
+1200h
+1280h
+1400h
+1401h
+1402h
+1403h
+1600h
+1601h
+1602h
+1603h
+1800h
+1801h
+1802h
+1803h
+1A00h
+1A01h
+1A02h
+1A03h
+6000h
+603Fh
+6040h
+6041h
+6060h
+6061h
+6064h
+606Ch
+607Ah
+60FFh
+6081h
+6083h
+6084h
+6502h
+
+[1000h]
+ParameterName=Device type
+ObjectType=0x7
+DataType=0x0007
+AccessType=ro
+DefaultValue=0x00020192
+
+[1001h]
+ParameterName=Error register
+ObjectType=0x7
+DataType=0x0005
+AccessType=ro
+
+[1003h]
+ParameterName=Pre-defined error field
+ObjectType=0x8
+DataType=0x0007
+AccessType=rw
+
+[1005h]
+ParameterName=COB-ID SYNC message
+ObjectType=0x7
+DataType=0x0007
+AccessType=rw
+DefaultValue=0x80
+
+[1006h]
+ParameterName=Communication cycle period
+ObjectType=0x7
+DataType=0x0007
+AccessType=rw
+DefaultValue=0
+
+[1007h]
+ParameterName=Synchronous window length
+ObjectType=0x7
+DataType=0x0007
+AccessType=rw
+DefaultValue=0
+
+[1010h]
+ParameterName=Store parameters
+ObjectType=0x8
+DataType=0x0007
+AccessType=rw
+
+[1011h]
+ParameterName=Restore default parameters
+ObjectType=0x8
+DataType=0x0007
+AccessType=rw
+
+[1012h]
+ParameterName=COB-ID time stamp
+ObjectType=0x7
+DataType=0x0007
+AccessType=rw
+DefaultValue=0x100
+
+[1014h]
+ParameterName=COB-ID EMCY
+ObjectType=0x7
+DataType=0x0007
+AccessType=rw
+DefaultValue=0x80
+
+[1015h]
+ParameterName=Inhibit time EMCY
+ObjectType=0x7
+DataType=0x0006
+AccessType=rw
+DefaultValue=0
+
+[1016h]
+ParameterName=Consumer heartbeat time
+ObjectType=0x8
+DataType=0x0007
+AccessType=rw
+
+[1017h]
+ParameterName=Producer heartbeat time
+ObjectType=0x7
+DataType=0x0006
+AccessType=rw
+DefaultValue=1000
+
+[1018h]
+ParameterName=Identity object
+ObjectType=0x9
+SubNumber=4
+AccessType=ro
+
+[1018hsub0]
+ParameterName=Number of entries
+ObjectType=0x7
+DataType=0x0005
+AccessType=ro
+DefaultValue=4
+
+[1018hsub1]
+ParameterName=Vendor ID
+ObjectType=0x7
+DataType=0x0007
+AccessType=ro
+
+[1018hsub2]
+ParameterName=Product code
+ObjectType=0x7
+DataType=0x0007
+AccessType=ro
+
+[1018hsub3]
+ParameterName=Revision number
+ObjectType=0x7
+DataType=0x0007
+AccessType=ro
+
+[1018hsub4]
+ParameterName=Serial number
+ObjectType=0x7
+DataType=0x0007
+AccessType=ro
+
+[1200h]
+ParameterName=SDO server parameter
+ObjectType=0x9
+SubNumber=2
+AccessType=ro
+
+[1200hsub0]
+ParameterName=Number of entries
+ObjectType=0x7
+DataType=0x0005
+AccessType=ro
+DefaultValue=2
+
+[1200hsub1]
+ParameterName=COB-ID client to server
+ObjectType=0x7
+DataType=0x0007
+AccessType=ro
+DefaultValue=0x600
+
+[1200hsub2]
+ParameterName=COB-ID server to client
+ObjectType=0x7
+DataType=0x0007
+AccessType=ro
+DefaultValue=0x580
+
+[1400h]
+ParameterName=RPDO 1 communication parameter
+ObjectType=0x9
+SubNumber=2
+AccessType=rw
+
+[1400hsub0]
+ParameterName=Number of entries
+ObjectType=0x7
+DataType=0x0005
+AccessType=ro
+DefaultValue=2
+
+[1400hsub1]
+ParameterName=COB-ID
+ObjectType=0x7
+DataType=0x0007
+AccessType=rw
+DefaultValue=0x201
+
+[1400hsub2]
+ParameterName=Transmission type
+ObjectType=0x7
+DataType=0x0005
+AccessType=rw
+DefaultValue=1
+
+[1600h]
+ParameterName=RPDO 1 mapping parameter
+ObjectType=0x9
+SubNumber=2
+AccessType=rw
+
+[1600hsub0]
+ParameterName=Number of mapped objects
+ObjectType=0x7
+DataType=0x0005
+AccessType=rw
+DefaultValue=2
+
+[1600hsub1]
+ParameterName=Mapped object 1
+ObjectType=0x7
+DataType=0x0007
+AccessType=rw
+DefaultValue=0x60400010
+
+[1600hsub2]
+ParameterName=Mapped object 2
+ObjectType=0x7
+DataType=0x0007
+AccessType=rw
+DefaultValue=0x607A0020
+
+[1800h]
+ParameterName=TPDO 1 communication parameter
+ObjectType=0x9
+SubNumber=3
+AccessType=rw
+
+[1800hsub0]
+ParameterName=Number of entries
+ObjectType=0x7
+DataType=0x0005
+AccessType=ro
+DefaultValue=3
+
+[1800hsub1]
+ParameterName=COB-ID
+ObjectType=0x7
+DataType=0x0007
+AccessType=rw
+DefaultValue=0x181
+
+[1800hsub2]
+ParameterName=Transmission type
+ObjectType=0x7
+DataType=0x0005
+AccessType=rw
+DefaultValue=254
+
+[1800hsub5]
+ParameterName=Event timer
+ObjectType=0x7
+DataType=0x0006
+AccessType=rw
+DefaultValue=1
+
+[1A00h]
+ParameterName=TPDO 1 mapping parameter
+ObjectType=0x9
+SubNumber=2
+AccessType=rw
+
+[1A00hsub0]
+ParameterName=Number of mapped objects
+ObjectType=0x7
+DataType=0x0005
+AccessType=rw
+DefaultValue=2
+
+[1A00hsub1]
+ParameterName=Mapped object 1
+ObjectType=0x7
+DataType=0x0007
+AccessType=rw
+DefaultValue=0x60410010
+
+[1A00hsub2]
+ParameterName=Mapped object 2
+ObjectType=0x7
+DataType=0x0007
+AccessType=rw
+DefaultValue=0x60640020
+
+[6000h]
+ParameterName=Velocity (sample)
+ObjectType=0x7
+DataType=0x0007
+AccessType=rw
+DefaultValue=0
+
+[603Fh]
+ParameterName=Error code
+ObjectType=0x7
+DataType=0x0006
+AccessType=rw
+DefaultValue=0
+
+[6040h]
+ParameterName=Controlword
+ObjectType=0x7
+DataType=0x0006
+AccessType=rw
+DefaultValue=0
+
+[6041h]
+ParameterName=Statusword
+ObjectType=0x7
+DataType=0x0006
+AccessType=ro
+DefaultValue=0
+
+[6060h]
+ParameterName=Modes of operation
+ObjectType=0x7
+DataType=0x0002
+AccessType=rw
+DefaultValue=0
+LowLimit=0
+HighLimit=6
+
+[6061h]
+ParameterName=Modes of operation display
+ObjectType=0x7
+DataType=0x0002
+AccessType=ro
+DefaultValue=0
+
+[6064h]
+ParameterName=Position actual value
+ObjectType=0x7
+DataType=0x0004
+AccessType=ro
+DefaultValue=0
+
+[606Ch]
+ParameterName=Velocity actual value
+ObjectType=0x7
+DataType=0x0004
+AccessType=ro
+DefaultValue=0
+
+[607Ah]
+ParameterName=Target position
+ObjectType=0x7
+DataType=0x0004
+AccessType=rw
+DefaultValue=0
+
+[60FFh]
+ParameterName=Target velocity
+ObjectType=0x7
+DataType=0x0004
+AccessType=rw
+DefaultValue=0
+
+[6081h]
+ParameterName=Profile velocity
+ObjectType=0x7
+DataType=0x0007
+AccessType=rw
+DefaultValue=20000
+
+[6083h]
+ParameterName=Profile acceleration
+ObjectType=0x7
+DataType=0x0007
+AccessType=rw
+DefaultValue=100000
+
+[6084h]
+ParameterName=Profile deceleration
+ObjectType=0x7
+DataType=0x0007
+AccessType=rw
+DefaultValue=100000
+
+[6502h]
+ParameterName=Supported drive modes
+ObjectType=0x7
+DataType=0x0007
+AccessType=ro
+DefaultValue=0x25
