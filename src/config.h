@@ -35,7 +35,7 @@
 #define CURR_I_DEFAULT      2.0f
 
 /* ---------------- 限制与保护 ---------------- */
-#define VOLTAGE_LIMIT_V     2.0f       /* Conservative startup torque; 0.8 A OCP remains active. */
+#define VOLTAGE_LIMIT_V     3.0f       /* Ramped startup torque; 0.6 A soft and 0.8 A hard OCP remain. */
 #define CURRENT_LIMIT_A     0.6f
 #define CURRENT_SOFT_LIMIT_A 0.60f      /* Proactively reduce Vq before 0.8 A hard OCP. */
 #define VOLTAGE_RISE_V_PER_S 8.0f
