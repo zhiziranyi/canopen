@@ -52,6 +52,10 @@ try {
     if (-not $voltageLimitMatch.Success -or [float]$voltageLimitMatch.Groups[1].Value -ne 2.0) {
         throw 'default voltage limit must be the validated 2.0 V startup value'
     }
+    $softCurrentMatch = [regex]::Match($configSource, '(?m)^#define\s+CURRENT_SOFT_LIMIT_A\s+([0-9.]+)f')
+    if (-not $softCurrentMatch.Success -or [float]$softCurrentMatch.Groups[1].Value -lt 0.55 -or [float]$softCurrentMatch.Groups[1].Value -gt 0.65) {
+        throw 'soft current limit must leave usable startup torque below the 0.8 A hard trip'
+    }
 
     if ($boardSource -notmatch 'ADC_INJECTED_SOFTWARE_START') {
         throw 'ADC injected conversion must use the validated software trigger'
