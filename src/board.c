@@ -469,9 +469,13 @@ void Error_Handler(void)
 {
     __disable_irq();
     while (1) {
+        volatile uint32_t delay;
         /* 错误：LED 快闪 */
         HAL_GPIO_TogglePin(PIN_LED0_GPIO, PIN_LED0_PIN);
-        HAL_Delay(100);
+        /* SysTick cannot advance while interrupts are disabled. */
+        for (delay = 0u; delay < 800000u; delay++) {
+            __NOP();
+        }
     }
 }
 

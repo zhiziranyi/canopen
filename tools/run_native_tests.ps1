@@ -24,6 +24,11 @@ try {
         throw 'drive_test.py must add the drive as a remote CANopen node'
     }
 
+    $boardSource = Get-Content -LiteralPath 'src/board.c' -Raw
+    if ($boardSource -match '(?s)void\s+Error_Handler\s*\([^)]*\).*?__disable_irq\s*\(\s*\).*?HAL_Delay\s*\(') {
+        throw 'Error_Handler must not call HAL_Delay after disabling SysTick interrupts'
+    }
+
     & gcc -std=c11 -Wall -Wextra -Werror -Isrc `
         test/native/test_main.c `
         src/foc.c `
