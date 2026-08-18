@@ -1,3 +1,4 @@
+#include "encoder_math.h"
 #include "foc.h"
 #include "pid.h"
 
@@ -74,12 +75,38 @@ static void test_pid_saturates_and_resets(void)
     CHECK_NEAR(pid.prev_error, 0.0f, 1.0e-6f);
 }
 
+static void test_encoder_wrap_is_one_count(void)
+{
+    encoder_math_t encoder;
+
+    encoder_math_init(&encoder, 4095u);
+    encoder_math_update(&encoder, 0u, 0.001f);
+    CHECK_TRUE(encoder_math_position(&encoder) == 1);
+    encoder_math_update(&encoder, 4095u, 0.001f);
+    CHECK_TRUE(encoder_math_position(&encoder) == 0);
+    CHECK_TRUE(fabsf(encoder_math_velocity(&encoder)) < 1000.0f);
+}
+
+static void test_encoder_accumulates_and_zeros_position(void)
+{
+    encoder_math_t encoder;
+
+    encoder_math_init(&encoder, 100u);
+    encoder_math_update(&encoder, 104u, 0.001f);
+    CHECK_TRUE(encoder_math_position(&encoder) == 4);
+    CHECK_TRUE(encoder_math_velocity(&encoder) > 0.0f);
+    encoder_math_zero_position(&encoder);
+    CHECK_TRUE(encoder_math_position(&encoder) == 0);
+}
+
 int main(void)
 {
     test_svpwm_zero_vector_is_centered();
     test_svpwm_outputs_are_bounded();
     test_clarke_park_d_axis();
     test_pid_saturates_and_resets();
+    test_encoder_wrap_is_one_count();
+    test_encoder_accumulates_and_zeros_position();
 
     if (failures != 0) {
         (void)printf("native tests: FAIL (%d)\n", failures);
