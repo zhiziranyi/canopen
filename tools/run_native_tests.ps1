@@ -43,6 +43,12 @@ try {
         throw 'Error_Handler must not call HAL_Delay after disabling SysTick interrupts'
     }
 
+    $configSource = Get-Content -LiteralPath 'src/config.h' -Raw
+    $voltageLimitMatch = [regex]::Match($configSource, '(?m)^#define\s+VOLTAGE_LIMIT_V\s+([0-9.]+)f')
+    if (-not $voltageLimitMatch.Success -or [float]$voltageLimitMatch.Groups[1].Value -lt 2.5) {
+        throw 'default voltage limit must provide enough startup torque (at least 2.5 V)'
+    }
+
     & gcc -std=c11 -Wall -Wextra -Werror -Isrc `
         test/native/test_main.c `
         src/foc.c `

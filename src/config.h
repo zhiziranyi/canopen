@@ -35,7 +35,7 @@
 #define CURR_I_DEFAULT      2.0f
 
 /* ---------------- 限制与保护 ---------------- */
-#define VOLTAGE_LIMIT_V     1.0f
+#define VOLTAGE_LIMIT_V     3.0f       /* 8.5 ohm phase: <=0.35 A before OCP */
 #define CURRENT_LIMIT_A     0.6f
 #define VELOCITY_LIMIT_CPS  50000.0f   /* counts/s，约 12 rev/s */
 #define OVERCURRENT_TRIP_A  0.8f
