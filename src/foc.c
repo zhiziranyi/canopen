@@ -5,6 +5,7 @@ void foc_reconstruct_currents(float ia, float du, float dv, float dw,
                               float* ib, float* ic)
 {
     float b, c, s;
+    (void)du;
     (void)dw;
     /* 依据 B/C 两相占空比按比例分配（单相内联采样的标准近似） */
     s = dv + dw;
