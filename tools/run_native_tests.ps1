@@ -79,6 +79,9 @@ try {
     if ($motorSource -notmatch '(?s)#endif\s*\r?\n\s*vq\s*=\s*voltage_limiter_step') {
         throw 'current-loop output must pass through the common voltage limiter'
     }
+    if ($motorSource -notmatch '(?s)s_aligning\s*=\s*0u;.*?s_iu\s*=\s*0\.0f;.*?s_iq\s*=\s*0\.0f;') {
+        throw 'alignment shutdown must clear residual current feedback before enable'
+    }
 
     & gcc -std=c11 -Wall -Wextra -Werror -Isrc `
         test/native/test_main.c `

@@ -222,6 +222,10 @@ int motor_align_foc(void)
     s_aligning = 0u;
     s_enabled = 0;
     s_align_v = 0.0f;
+    s_iu = 0.0f;
+    s_id = 0.0f;
+    s_iq = 0.0f;
+    s_overcurrent_samples = 0u;
     pwm_set_duty(0.0f, 0.0f, 0.0f);
     HAL_GPIO_WritePin(PIN_DRV_EN_GPIO, PIN_DRV_EN_PIN, GPIO_PIN_RESET);
     dbg_printf("[FOC] align ok, dir=%d, offset=%ldmrad, move=%ldmrad\r\n",
