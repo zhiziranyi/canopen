@@ -11,8 +11,17 @@
 
 #include <stdint.h>
 
-void motor_init(void);
-void motor_align_foc(void);   /* 上电 FOC 对齐校准（必做） */
+typedef enum {
+    MOTOR_FAULT_NONE = 0,
+    MOTOR_FAULT_INIT,
+    MOTOR_FAULT_CONTROL_TIMING,
+    MOTOR_FAULT_ALIGNMENT,
+    MOTOR_FAULT_ENCODER,
+    MOTOR_FAULT_OVERCURRENT
+} motor_fault_t;
+
+int  motor_init(void);
+int  motor_align_foc(void);   /* 上电 FOC 对齐校准（必做） */
 void motor_enable(void);
 void motor_disable(void);
 int  motor_is_enabled(void);
@@ -36,8 +45,11 @@ float   motor_get_voltage_cmd(void);
 int32_t motor_get_position(void);
 float   motor_get_velocity(void);
 float   motor_get_velocity_cmd(void);
-int     motor_get_fault(void);
+motor_fault_t motor_get_fault(void);
+const char* motor_fault_name(motor_fault_t fault);
 void    motor_clear_fault(void);
+uint32_t motor_get_control_update_count(void);
+uint32_t motor_get_velocity_tick_count(void);
 
 /* 中断钩子（board.c 调度） */
 void motor_current_loop_isr(void);   /* 20kHz */

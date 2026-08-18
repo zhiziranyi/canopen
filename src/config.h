@@ -43,5 +43,6 @@
 /* FOC 上电对齐校准 */
 #define FOC_ALIGN_VOLTAGE   1.0f     /* 校准电压 (V) */
 #define FOC_ALIGN_TIME_MS   1500     /* 每步保持时间 (ms) */
+#define FOC_ALIGN_MIN_MOVE_RAD 0.02f /* 方向检测所需的最小机械角变化 */
 
 #endif /* APP_CONFIG_H */

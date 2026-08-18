@@ -1,121 +1,199 @@
 #include "motor.h"
+
 #include "board.h"
 #include "config.h"
 #include "encoder.h"
 #include "foc.h"
+#include "motion_profile.h"
 #include "pid.h"
+
 #include <math.h>
 
-/* ---------------- 内部状态 ---------------- */
+#define MOTOR_ALIGN_TEST_ANGLE_RAD 1.04719755f
+#define MOTOR_TWO_PI_RAD 6.28318531f
+#define MOTOR_CONTROL_START_MIN_UPDATES 100u
+
 static volatile int s_enabled = 0;
-static volatile int s_fault = 0;
-
-static volatile float s_torque_voltage = 0.0f;   /* 电压型 Vq 指令 (V) */
-static volatile float s_current_target = 0.0f;   /* 电流型 Iq 指令 (A) */
-static volatile float s_velocity_cmd = 0.0f;     /* counts/s */
+static volatile motor_fault_t s_fault = MOTOR_FAULT_NONE;
+static volatile float s_torque_voltage = 0.0f;
+static volatile float s_current_target = 0.0f;
+static volatile float s_velocity_cmd = 0.0f;
 static volatile int32_t s_position_target = 0;
-static volatile int s_position_mode = 0;         /* 1 = 轮廓位置模式 */
-
+static volatile int s_position_mode = 0;
 static volatile float s_iu = 0.0f;
 static volatile float s_id = 0.0f;
 static volatile float s_iq = 0.0f;
 static volatile float s_vcmd = 0.0f;
-static volatile uint8_t s_aligning = 0;
+static volatile uint8_t s_aligning = 0u;
 static volatile float s_align_v = 0.0f;
 static volatile float s_align_angle = 0.0f;
+static volatile uint32_t s_control_update_count = 0u;
+static volatile uint32_t s_velocity_tick_count = 0u;
 
 static pid_t s_curr_id_pid;
 static pid_t s_curr_iq_pid;
 static pid_t s_vel_pid;
+static motion_profile_t s_position_profile;
 static float s_pos_kp = POS_P_DEFAULT;
 
-static uint32_t s_profile_vel = 20000;    /* counts/s */
-static uint32_t s_profile_acc = 100000;   /* counts/s^2 */
-static uint32_t s_profile_dec = 100000;
+static float clamp01(float value)
+{
+    if (value < 0.0f) {
+        return 0.0f;
+    }
+    if (value > 1.0f) {
+        return 1.0f;
+    }
+    return value;
+}
 
-/* ---------------- 内部函数 ---------------- */
 static void pwm_set_duty(float du, float dv, float dw)
 {
     uint32_t arr = __HAL_TIM_GET_AUTORELOAD(&htim1);
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, (uint32_t)(du * (float)arr));
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, (uint32_t)(dv * (float)arr));
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, (uint32_t)(dw * (float)arr));
+    uint32_t period_counts = arr + 1u;
+    uint32_t compare_u = (uint32_t)(clamp01(du) * (float)period_counts);
+    uint32_t compare_v = (uint32_t)(clamp01(dv) * (float)period_counts);
+    uint32_t compare_w = (uint32_t)(clamp01(dw) * (float)period_counts);
+
+    if (compare_u > arr) compare_u = arr;
+    if (compare_v > arr) compare_v = arr;
+    if (compare_w > arr) compare_w = arr;
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, compare_u);
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, compare_v);
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, compare_w);
+}
+
+static void motor_latch_fault(motor_fault_t fault)
+{
+    if (fault == MOTOR_FAULT_NONE || s_fault != MOTOR_FAULT_NONE) {
+        return;
+    }
+    s_fault = fault;
+    s_enabled = 0;
+    s_aligning = 0u;
+    s_torque_voltage = 0.0f;
+    s_current_target = 0.0f;
+    s_velocity_cmd = 0.0f;
+    pwm_set_duty(0.0f, 0.0f, 0.0f);
+    HAL_GPIO_WritePin(PIN_DRV_EN_GPIO, PIN_DRV_EN_PIN, GPIO_PIN_RESET);
 }
 
 static void adc_start_sample(void)
 {
-    HAL_ADCEx_InjectedStart_IT(&hadc1);
+    HAL_StatusTypeDef status = HAL_ADCEx_InjectedStart_IT(&hadc1);
+    if (status != HAL_OK && status != HAL_BUSY) {
+        motor_latch_fault(MOTOR_FAULT_INIT);
+    }
 }
 
-/* ========================================================================
- * 初始化
- * ===================================================================== */
-void motor_init(void)
+static float wrap_mechanical_delta(float delta)
 {
-    pid_init(&s_curr_id_pid, CURR_P_DEFAULT, CURR_I_DEFAULT, 0.0f,
-             -VOLTAGE_LIMIT_V, VOLTAGE_LIMIT_V, 1.0f / FOC_LOOP_HZ);
-    pid_init(&s_curr_iq_pid, CURR_P_DEFAULT, CURR_I_DEFAULT, 0.0f,
-             -VOLTAGE_LIMIT_V, VOLTAGE_LIMIT_V, 1.0f / FOC_LOOP_HZ);
-    pid_init(&s_vel_pid, VEL_P_DEFAULT, VEL_I_DEFAULT, 0.0f,
-             -VOLTAGE_LIMIT_V, VOLTAGE_LIMIT_V, 1.0f / VEL_LOOP_HZ);
+    if (delta > 3.14159265f) {
+        delta -= MOTOR_TWO_PI_RAD;
+    } else if (delta < -3.14159265f) {
+        delta += MOTOR_TWO_PI_RAD;
+    }
+    return delta;
+}
 
-    /* 启动三路 PWM + 更新中断（20kHz 电流环），EN 保持低 */
-    HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_1);
-    HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_2);
-    HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_3);
+int motor_init(void)
+{
+    HAL_StatusTypeDef status;
+
+    s_enabled = 0;
+    s_aligning = 0u;
+    s_fault = MOTOR_FAULT_NONE;
+    HAL_GPIO_WritePin(PIN_DRV_EN_GPIO, PIN_DRV_EN_PIN, GPIO_PIN_RESET);
     pwm_set_duty(0.0f, 0.0f, 0.0f);
 
-    /* 启动 1kHz 速度/位置环 */
-    HAL_TIM_Base_Start_IT(&htim7);
+    pid_init(&s_curr_id_pid, CURR_P_DEFAULT, CURR_I_DEFAULT, 0.0f,
+             -VOLTAGE_LIMIT_V, VOLTAGE_LIMIT_V, 1.0f / (float)FOC_LOOP_HZ);
+    pid_init(&s_curr_iq_pid, CURR_P_DEFAULT, CURR_I_DEFAULT, 0.0f,
+             -VOLTAGE_LIMIT_V, VOLTAGE_LIMIT_V, 1.0f / (float)FOC_LOOP_HZ);
+    pid_init(&s_vel_pid, VEL_P_DEFAULT, VEL_I_DEFAULT, 0.0f,
+             -VOLTAGE_LIMIT_V, VOLTAGE_LIMIT_V, 1.0f / (float)VEL_LOOP_HZ);
+    motion_profile_init(&s_position_profile, 20000.0f, 100000.0f, 100000.0f);
 
-    /* 启动 ADC 注入采样 */
+    status = HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+    if (status == HAL_OK) status = HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
+    if (status == HAL_OK) status = HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
+    if (status == HAL_OK) status = HAL_TIM_Base_Start_IT(&htim1);
+    if (status == HAL_OK) status = HAL_TIM_Base_Start_IT(&htim7);
+    if (status != HAL_OK) {
+        motor_latch_fault(MOTOR_FAULT_INIT);
+        return -1;
+    }
+
     adc_start_sample();
+    (void)encoder_start_sample();
+    if (!encoder_is_healthy()) {
+        motor_latch_fault(MOTOR_FAULT_ENCODER);
+        return -1;
+    }
+    return 0;
 }
 
-/* ========================================================================
- * FOC 上电对齐校准：
- *   1. 施加固定电压矢量(电角度 0)，转子对齐到 A 相磁场
- *   2. 电角度 +60°，转子跟随转动，据此判断编码器方向
- *   3. 记录零点偏移与方向，之后正常 FOC 即可正确换相
- * ===================================================================== */
-void motor_align_foc(void)
+int motor_align_foc(void)
 {
-    float ma, mb, d;
-    int8_t dir = 1;
+    uint32_t updates_before;
+    float angle_zero;
+    float angle_test;
+    float movement;
+    int8_t direction;
 
-    HAL_GPIO_WritePin(PIN_DRV_EN_GPIO, PIN_DRV_EN_PIN, GPIO_PIN_SET);
-    s_aligning = 1;
-    s_enabled = 1;
-    s_fault = 0;
+    if (s_fault != MOTOR_FAULT_NONE || !encoder_is_healthy()) {
+        motor_latch_fault(MOTOR_FAULT_ENCODER);
+        return -1;
+    }
+
+    updates_before = s_control_update_count;
     s_align_v = FOC_ALIGN_VOLTAGE;
+    s_align_angle = 0.0f;
+    s_aligning = 1u;
+    s_enabled = 1;
+    HAL_GPIO_WritePin(PIN_DRV_EN_GPIO, PIN_DRV_EN_PIN, GPIO_PIN_SET);
+    HAL_Delay(FOC_ALIGN_TIME_MS);
+
+    if ((s_control_update_count - updates_before) < MOTOR_CONTROL_START_MIN_UPDATES) {
+        motor_latch_fault(MOTOR_FAULT_CONTROL_TIMING);
+        return -1;
+    }
+    if (!encoder_is_healthy()) {
+        motor_latch_fault(MOTOR_FAULT_ENCODER);
+        return -1;
+    }
+    angle_zero = encoder_get_mech_angle_rad();
+
+    s_align_angle = MOTOR_ALIGN_TEST_ANGLE_RAD;
+    HAL_Delay(FOC_ALIGN_TIME_MS);
+    angle_test = encoder_get_mech_angle_rad();
+    movement = wrap_mechanical_delta(angle_test - angle_zero);
+    if (!encoder_is_healthy() || fabsf(movement) < FOC_ALIGN_MIN_MOVE_RAD) {
+        motor_latch_fault(MOTOR_FAULT_ALIGNMENT);
+        return -1;
+    }
+    direction = (movement < 0.0f) ? -1 : 1;
 
     s_align_angle = 0.0f;
     HAL_Delay(FOC_ALIGN_TIME_MS);
-    ma = encoder_get_mech_angle_rad();
+    angle_zero = encoder_get_mech_angle_rad();
+    encoder_set_align(angle_zero, direction);
 
-    s_align_angle = 1.0472f;   /* +60° 电角度 */
-    HAL_Delay(FOC_ALIGN_TIME_MS);
-    mb = encoder_get_mech_angle_rad();
-
-    d = mb - ma;
-    if (d > 3.14159f) d -= 6.28318f;
-    else if (d < -3.14159f) d += 6.28318f;
-    if (d < 0.0f) dir = -1;
-
-    encoder_set_align(ma, dir);
-
-    s_aligning = 0;
+    s_aligning = 0u;
     s_enabled = 0;
+    s_align_v = 0.0f;
     pwm_set_duty(0.0f, 0.0f, 0.0f);
     HAL_GPIO_WritePin(PIN_DRV_EN_GPIO, PIN_DRV_EN_PIN, GPIO_PIN_RESET);
-
-    dbg_printf("[FOC] align ok, dir=%d, offset=%.4f rad\r\n",
-               dir, (double)ma);
+    dbg_printf("[FOC] align ok, dir=%d, offset=%.4f rad, move=%.4f rad\r\n",
+               direction, (double)angle_zero, (double)movement);
+    return 0;
 }
 
 void motor_enable(void)
 {
-    if (s_fault) return;
+    if (s_fault != MOTOR_FAULT_NONE || !encoder_is_healthy()) {
+        return;
+    }
     pid_reset(&s_curr_id_pid);
     pid_reset(&s_curr_iq_pid);
     pid_reset(&s_vel_pid);
@@ -132,6 +210,8 @@ void motor_disable(void)
     s_torque_voltage = 0.0f;
     s_current_target = 0.0f;
     s_velocity_cmd = 0.0f;
+    s_position_mode = 0;
+    motion_profile_stop(&s_position_profile);
     pwm_set_duty(0.0f, 0.0f, 0.0f);
     HAL_GPIO_WritePin(PIN_DRV_EN_GPIO, PIN_DRV_EN_PIN, GPIO_PIN_RESET);
 }
@@ -141,29 +221,28 @@ int motor_is_enabled(void)
     return s_enabled;
 }
 
-/* ========================================================================
- * 指令接口
- * ===================================================================== */
 void motor_set_velocity_target(float cps)
 {
     s_position_mode = 0;
+    if (cps > VELOCITY_LIMIT_CPS) cps = VELOCITY_LIMIT_CPS;
+    if (cps < -VELOCITY_LIMIT_CPS) cps = -VELOCITY_LIMIT_CPS;
     s_velocity_cmd = cps;
-    if (s_velocity_cmd > VELOCITY_LIMIT_CPS) s_velocity_cmd = VELOCITY_LIMIT_CPS;
-    if (s_velocity_cmd < -VELOCITY_LIMIT_CPS) s_velocity_cmd = -VELOCITY_LIMIT_CPS;
 }
 
 void motor_set_position_target(int32_t counts)
 {
-    s_position_mode = 1;
+    int32_t current = encoder_get_position();
     s_position_target = counts;
+    motion_profile_set_target(&s_position_profile, current, counts);
+    s_position_mode = 1;
 }
 
 void motor_set_torque_voltage(float vq)
 {
     s_position_mode = 0;
+    if (vq > VOLTAGE_LIMIT_V) vq = VOLTAGE_LIMIT_V;
+    if (vq < -VOLTAGE_LIMIT_V) vq = -VOLTAGE_LIMIT_V;
     s_torque_voltage = vq;
-    if (s_torque_voltage > VOLTAGE_LIMIT_V) s_torque_voltage = VOLTAGE_LIMIT_V;
-    if (s_torque_voltage < -VOLTAGE_LIMIT_V) s_torque_voltage = -VOLTAGE_LIMIT_V;
 }
 
 void motor_stop(void)
@@ -172,27 +251,35 @@ void motor_stop(void)
     s_velocity_cmd = 0.0f;
     s_torque_voltage = 0.0f;
     s_current_target = 0.0f;
+    motion_profile_stop(&s_position_profile);
     pid_reset(&s_vel_pid);
 }
 
 void motor_set_profile(uint32_t vel_cps, uint32_t acc_cps2, uint32_t dec_cps2)
 {
-    s_profile_vel = vel_cps;
-    s_profile_acc = acc_cps2;
-    s_profile_dec = dec_cps2;
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    motion_profile_set_limits(&s_position_profile, (float)vel_cps,
+                              (float)acc_cps2, (float)dec_cps2);
+    __set_PRIMASK(primask);
 }
 
-void motor_set_position_p(float kp) { s_pos_kp = kp; }
-void motor_set_velocity_pi(float kp, float ki) { pid_set_gains(&s_vel_pid, kp, ki, 0.0f); }
+void motor_set_position_p(float kp)
+{
+    s_pos_kp = kp;
+}
+
+void motor_set_velocity_pi(float kp, float ki)
+{
+    pid_set_gains(&s_vel_pid, kp, ki, 0.0f);
+}
+
 void motor_set_current_pi(float kp, float ki)
 {
     pid_set_gains(&s_curr_id_pid, kp, ki, 0.0f);
     pid_set_gains(&s_curr_iq_pid, kp, ki, 0.0f);
 }
 
-/* ========================================================================
- * 状态读取
- * ===================================================================== */
 float motor_get_current_u(void) { return s_iu; }
 float motor_get_current_iq(void) { return s_iq; }
 float motor_get_current_id(void) { return s_id; }
@@ -200,23 +287,51 @@ float motor_get_voltage_cmd(void) { return s_vcmd; }
 int32_t motor_get_position(void) { return encoder_get_position(); }
 float motor_get_velocity(void) { return encoder_get_velocity(); }
 float motor_get_velocity_cmd(void) { return s_velocity_cmd; }
-int motor_get_fault(void) { return s_fault; }
-void motor_clear_fault(void) { s_fault = 0; }
+motor_fault_t motor_get_fault(void) { return s_fault; }
+uint32_t motor_get_control_update_count(void) { return s_control_update_count; }
+uint32_t motor_get_velocity_tick_count(void) { return s_velocity_tick_count; }
 
-/* ========================================================================
- * 20kHz 电流环（TIM1 更新中断）
- * ===================================================================== */
+const char* motor_fault_name(motor_fault_t fault)
+{
+    switch (fault) {
+        case MOTOR_FAULT_NONE: return "none";
+        case MOTOR_FAULT_INIT: return "init";
+        case MOTOR_FAULT_CONTROL_TIMING: return "control-timing";
+        case MOTOR_FAULT_ALIGNMENT: return "alignment";
+        case MOTOR_FAULT_ENCODER: return "encoder";
+        case MOTOR_FAULT_OVERCURRENT: return "overcurrent";
+        default: return "unknown";
+    }
+}
+
+void motor_clear_fault(void)
+{
+    if (s_fault == MOTOR_FAULT_ENCODER && !encoder_is_healthy()) {
+        return;
+    }
+    s_fault = MOTOR_FAULT_NONE;
+}
+
 void motor_current_loop_isr(void)
 {
-    float ia, ib, ic, sin_e, cos_e;
-    float id_cmd = 0.0f;
-    float du, dv, dw;
-    float vd = 0.0f, vq = 0.0f;
+    float ia;
+    float ib;
+    float ic;
+    float electrical_angle;
+    float sin_e;
+    float cos_e;
+    float id_value;
+    float iq_value;
+    float du;
+    float dv;
+    float dw;
+    float vd = 0.0f;
+    float vq = 0.0f;
 
-    /* 校准模式：固定电压矢量，不使用编码器反馈 */
-    if (s_aligning) {
-        float du, dv, dw;
-        foc_inverse_park_svpwm(0.0f, s_align_v,
+    s_control_update_count++;
+
+    if (s_aligning != 0u) {
+        foc_inverse_park_svpwm(s_align_v, 0.0f,
                                sinf(s_align_angle), cosf(s_align_angle),
                                MOTOR_BUS_VOLTAGE, &du, &dv, &dw);
         pwm_set_duty(du, dv, dw);
@@ -224,143 +339,85 @@ void motor_current_loop_isr(void)
         return;
     }
 
-    if (!s_enabled || s_fault) {
+    if (!s_enabled || s_fault != MOTOR_FAULT_NONE) {
         pwm_set_duty(0.0f, 0.0f, 0.0f);
         adc_start_sample();
         return;
     }
 
     ia = s_iu;
-
-    /* 过流保护 */
     if (fabsf(ia) > OVERCURRENT_TRIP_A) {
-        s_fault = 1;
-        motor_disable();
+        motor_latch_fault(MOTOR_FAULT_OVERCURRENT);
         adc_start_sample();
         return;
     }
 
-    du = (float)__HAL_TIM_GET_COMPARE(&htim1, TIM_CHANNEL_1) /
-         (float)(__HAL_TIM_GET_AUTORELOAD(&htim1) + 1);
-    dv = (float)__HAL_TIM_GET_COMPARE(&htim1, TIM_CHANNEL_2) /
-         (float)(__HAL_TIM_GET_AUTORELOAD(&htim1) + 1);
-    dw = (float)__HAL_TIM_GET_COMPARE(&htim1, TIM_CHANNEL_3) /
-         (float)(__HAL_TIM_GET_AUTORELOAD(&htim1) + 1);
-
-    float id_val, iq_val;
+    du = (float)__HAL_TIM_GET_COMPARE(&htim1, TIM_CHANNEL_1)
+       / (float)(__HAL_TIM_GET_AUTORELOAD(&htim1) + 1u);
+    dv = (float)__HAL_TIM_GET_COMPARE(&htim1, TIM_CHANNEL_2)
+       / (float)(__HAL_TIM_GET_AUTORELOAD(&htim1) + 1u);
+    dw = (float)__HAL_TIM_GET_COMPARE(&htim1, TIM_CHANNEL_3)
+       / (float)(__HAL_TIM_GET_AUTORELOAD(&htim1) + 1u);
     foc_reconstruct_currents(ia, du, dv, dw, &ib, &ic);
-    sin_e = sinf(encoder_get_elec_angle_rad());
-    cos_e = cosf(encoder_get_elec_angle_rad());
-    foc_clarke_park(ia, ib, ic, sin_e, cos_e, &id_val, &iq_val);
-    s_id = id_val;
-    s_iq = iq_val;
+
+    electrical_angle = encoder_get_elec_angle_rad();
+    sin_e = sinf(electrical_angle);
+    cos_e = cosf(electrical_angle);
+    foc_clarke_park(ia, ib, ic, sin_e, cos_e, &id_value, &iq_value);
+    s_id = id_value;
+    s_iq = iq_value;
 
 #if FOC_CURRENT_LOOP_ENABLE
-    vd = pid_update(&s_curr_id_pid, id_cmd - id_val);
-    vq = pid_update(&s_curr_iq_pid, s_current_target - iq_val);
+    vd = pid_update(&s_curr_id_pid, -id_value);
+    vq = pid_update(&s_curr_iq_pid, s_current_target - iq_value);
 #else
-    /* 电压型：Vq 直接来自速度环/力矩指令，Vd = 0 */
-    (void)id_cmd;
     vq = s_torque_voltage;
 #endif
     s_vcmd = vq;
-
-    foc_inverse_park_svpwm(vd, vq, sin_e, cos_e, MOTOR_BUS_VOLTAGE, &du, &dv, &dw);
+    foc_inverse_park_svpwm(vd, vq, sin_e, cos_e,
+                           MOTOR_BUS_VOLTAGE, &du, &dv, &dw);
     pwm_set_duty(du, dv, dw);
-
-    /* 触发下一次 ADC 采样（本周期结束时结果就绪） */
     adc_start_sample();
 }
 
-/* ========================================================================
- * 1kHz 速度/位置环（TIM7 中断）
- * ===================================================================== */
 void motor_velocity_loop_isr(void)
 {
-    static uint32_t profile_tick = 0;
-    static uint32_t profile_total_ticks = 0;
-    static int32_t profile_dist = 0;
+    float velocity_actual;
+    float velocity_error;
 
+    s_velocity_tick_count++;
     encoder_update_1k();
+    (void)encoder_start_sample();
 
-    if (!s_enabled || s_fault) {
+    if (!encoder_is_healthy()) {
+        motor_latch_fault(MOTOR_FAULT_ENCODER);
+        return;
+    }
+    if (!s_enabled || s_fault != MOTOR_FAULT_NONE) {
         pid_reset(&s_vel_pid);
         return;
     }
 
-    /* ---- 轮廓位置模式：梯形速度规划 ---- */
     if (s_position_mode) {
-        int32_t cur = encoder_get_position();
-        int32_t dist = s_position_target - cur;
-        if (dist != profile_dist) {
-            /* 新目标：重新规划 */
-            profile_dist = dist;
-            profile_tick = 0;
-            /* 加速段 + 减速段总时间（梯形，初末速 0） */
-            int32_t ad = (dist >= 0) ? 1 : -1;
-            uint32_t d = (uint32_t)(ad * dist);
-            uint32_t t1 = (s_profile_vel > 0) ? (s_profile_acc > 0 ? s_profile_vel / s_profile_acc : 1) : 1;
-            uint32_t t2 = (s_profile_vel > 0) ? (s_profile_dec > 0 ? s_profile_vel / s_profile_dec : 1) : 1;
-            uint32_t dist_at_vel = d - (s_profile_vel * t1 / 2) - (s_profile_vel * t2 / 2);
-            uint32_t t3 = (s_profile_vel > 0) ? (dist_at_vel + s_profile_vel - 1) / s_profile_vel : 1;
-            if ((int32_t)dist_at_vel <= 0) {
-                /* 三角型速度曲线 */
-                t3 = 0;
-                uint32_t t_tri = 1;
-                float vp = sqrtf(2.0f * (float)d * (float)s_profile_acc * (float)s_profile_dec /
-                                 ((float)s_profile_acc + (float)s_profile_dec));
-                if (vp < (float)s_profile_vel) {
-                    t1 = (uint32_t)(vp / (float)s_profile_acc) + 1;
-                    t2 = (uint32_t)(vp / (float)s_profile_dec) + 1;
-                    t_tri = t1 + t2;
-                } else {
-                    t_tri = t1 + t2;
-                }
-                profile_total_ticks = t_tri;
-            } else {
-                profile_total_ticks = t1 + t2 + t3;
-            }
-        }
-
-        profile_tick++;
-        if (profile_tick >= profile_total_ticks) {
-            profile_tick = profile_total_ticks;
-            s_velocity_cmd = 0.0f;
-            motor_set_velocity_target(0.0f);
-            s_position_mode = 0;
-        } else {
-            /* 速度指令：到达剩余距离的一半时开始减速（简化为分段梯形） */
-            int32_t remain = s_position_target - encoder_get_position();
-            int32_t ad = (profile_dist >= 0) ? 1 : -1;
-            float v_rem = (float)remain * (float)ad;
-            float v_lim = sqrtf(2.0f * v_rem * (float)s_profile_dec);
-            float v_max = (float)s_profile_vel;
-            float v_cmd = v_max;
-            if (v_lim < v_cmd) v_cmd = v_lim;
-            if (v_cmd > v_max) v_cmd = v_max;
-            s_velocity_cmd = (float)ad * v_cmd;
-        }
+        s_velocity_cmd = motion_profile_step(&s_position_profile,
+                                             encoder_get_position(),
+                                             1.0f / (float)VEL_LOOP_HZ);
     }
 
-    /* ---- 速度环：输出 Vq（电压型）或 Iq（电流型） ---- */
-    float vel_act = encoder_get_velocity();
-    float vel_err = s_velocity_cmd - vel_act;
+    velocity_actual = encoder_get_velocity();
+    velocity_error = s_velocity_cmd - velocity_actual;
 #if FOC_CURRENT_LOOP_ENABLE
-    s_current_target = pid_update(&s_vel_pid, vel_err);
+    s_current_target = pid_update(&s_vel_pid, velocity_error);
     if (s_current_target > CURRENT_LIMIT_A) s_current_target = CURRENT_LIMIT_A;
     if (s_current_target < -CURRENT_LIMIT_A) s_current_target = -CURRENT_LIMIT_A;
 #else
-    s_torque_voltage = pid_update(&s_vel_pid, vel_err);
+    s_torque_voltage = pid_update(&s_vel_pid, velocity_error);
 #endif
 }
 
-/* ========================================================================
- * ADC 注入转换完成：读取 U 相电流
- * ===================================================================== */
 void motor_adc_complete_isr(void)
 {
     uint32_t raw = HAL_ADCEx_InjectedGetValue(&hadc1, ADC_INJECTED_RANK_1);
-    float v = (float)raw * CURRENT_SENSE_SCALE;
-    /* INA240: Vout = 1.65V + 2.0 * I */
-    s_iu = (v - CURRENT_SENSE_OFFSET_V) / CURRENT_SENSE_GAIN;
+    float voltage = (float)raw * CURRENT_SENSE_SCALE;
+    s_iu = (voltage - CURRENT_SENSE_OFFSET_V) / CURRENT_SENSE_GAIN;
 }

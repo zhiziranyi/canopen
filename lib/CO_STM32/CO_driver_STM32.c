@@ -78,7 +78,9 @@ CO_CANsetNormalMode(CO_CANmodule_t* CANmodule) {
 /******************************************************************************/
 CO_ReturnError_t
 CO_CANmodule_init(CO_CANmodule_t* CANmodule, void* CANptr, CO_CANrx_t rxArray[], uint16_t rxSize, CO_CANtx_t txArray[],
-                  uint16_t txSize, uint16_t CANbitRate) {
+                   uint16_t txSize, uint16_t CANbitRate) {
+
+    (void)CANbitRate; /* bxCAN bitrate is configured by MX_CAN_Init(). */
 
     /* verify arguments */
     if (CANmodule == NULL || rxArray == NULL || txArray == NULL) {
@@ -501,6 +503,10 @@ prv_read_can_received_msg(CAN_HandleTypeDef* hcan, uint32_t fifo, uint32_t fifo_
 #endif
 {
 
+#ifndef CO_STM32_FDCAN_Driver
+    (void)fifo_isrs;
+#endif
+
     CO_CANrxMsg_t rcvMsg;
     CO_CANrx_t* buffer = NULL; /* receive message buffer from CO_CANmodule_t object. */
     uint16_t index;            /* index of received message */
@@ -681,6 +687,8 @@ HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef* hcan) {
 void
 CO_CANinterrupt_TX(CO_CANmodule_t* CANmodule, uint32_t MailboxNumber) {
 
+    (void)MailboxNumber;
+
     CANmodule->firstCANtxMessage = false;            /* First CAN message (bootup) was sent successfully */
     CANmodule->bufferInhibitFlag = false;            /* Clear flag from previous message */
     if (CANmodule->CANtxCount > 0U) {                /* Are there any new messages waiting to be send */
@@ -714,16 +722,19 @@ CO_CANinterrupt_TX(CO_CANmodule_t* CANmodule, uint32_t MailboxNumber) {
 
 void
 HAL_CAN_TxMailbox0CompleteCallback(CAN_HandleTypeDef* hcan) {
+    (void)hcan;
     CO_CANinterrupt_TX(CANModule_local, CAN_TX_MAILBOX0);
 }
 
 void
 HAL_CAN_TxMailbox1CompleteCallback(CAN_HandleTypeDef* hcan) {
-    CO_CANinterrupt_TX(CANModule_local, CAN_TX_MAILBOX0);
+    (void)hcan;
+    CO_CANinterrupt_TX(CANModule_local, CAN_TX_MAILBOX1);
 }
 
 void
 HAL_CAN_TxMailbox2CompleteCallback(CAN_HandleTypeDef* hcan) {
-    CO_CANinterrupt_TX(CANModule_local, CAN_TX_MAILBOX0);
+    (void)hcan;
+    CO_CANinterrupt_TX(CANModule_local, CAN_TX_MAILBOX2);
 }
 #endif

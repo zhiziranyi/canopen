@@ -127,16 +127,24 @@ int main(void)
 
     dbg_printf("[TFT] init done\r\n");
 
-    motor_init();
     if (encoder_init() != 0) {
         dbg_printf("[WARN] AS5600 not responding (check I2C wiring)\r\n");
         s_enc_ok = 0;
     } else {
         dbg_printf("[OK] AS5600 encoder ready\r\n");
         s_enc_ok = 1;
+    }
+
+    if (motor_init() != 0) {
+        dbg_printf("[FAULT] motor init failed: %s\r\n",
+                   motor_fault_name(motor_get_fault()));
+    } else if (s_enc_ok) {
         /* FOC 上电对齐校准：电机会短暂跳动对齐（正常现象） */
         dbg_printf("[FOC] aligning rotor...\r\n");
-        motor_align_foc();
+        if (motor_align_foc() != 0) {
+            dbg_printf("[FAULT] FOC alignment failed: %s\r\n",
+                       motor_fault_name(motor_get_fault()));
+        }
     }
 
     app_canopen_init();
