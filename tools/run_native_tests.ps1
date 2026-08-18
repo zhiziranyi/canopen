@@ -15,6 +15,12 @@ try {
     if ($motorSource -notmatch 'HAL_TIM_Base_Start_IT\s*\(\s*&htim1\s*\)') {
         throw 'motor.c must explicitly start the TIM1 update interrupt'
     }
+    $currentLoopStart = $motorSource.IndexOf('void motor_current_loop_isr')
+    $alignmentBranch = $motorSource.IndexOf('if (s_aligning != 0u)', $currentLoopStart)
+    $overcurrentCheck = $motorSource.IndexOf('fabsf(s_iu) > OVERCURRENT_TRIP_A', $currentLoopStart)
+    if ($currentLoopStart -lt 0 -or $alignmentBranch -lt 0 -or $overcurrentCheck -lt $currentLoopStart -or $overcurrentCheck -gt $alignmentBranch) {
+        throw 'motor current ISR must enforce overcurrent protection before alignment output'
+    }
 
     $driveTestSource = Get-Content -LiteralPath 'tools/drive_test.py' -Raw
     if ($driveTestSource -match 'network\.create_node\s*\(') {

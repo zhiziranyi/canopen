@@ -337,6 +337,12 @@ void motor_current_loop_isr(void)
 
     s_control_update_count++;
 
+    if ((s_aligning != 0u || s_enabled) && fabsf(s_iu) > OVERCURRENT_TRIP_A) {
+        motor_latch_fault(MOTOR_FAULT_OVERCURRENT);
+        adc_start_sample();
+        return;
+    }
+
     if (s_aligning != 0u) {
         foc_inverse_park_svpwm(s_align_v, 0.0f,
                                sinf(s_align_angle), cosf(s_align_angle),
@@ -353,11 +359,6 @@ void motor_current_loop_isr(void)
     }
 
     ia = s_iu;
-    if (fabsf(ia) > OVERCURRENT_TRIP_A) {
-        motor_latch_fault(MOTOR_FAULT_OVERCURRENT);
-        adc_start_sample();
-        return;
-    }
 
     du = (float)__HAL_TIM_GET_COMPARE(&htim1, TIM_CHANNEL_1)
        / (float)(__HAL_TIM_GET_AUTORELOAD(&htim1) + 1u);
