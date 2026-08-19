@@ -2,7 +2,7 @@
 
 基于 STM32F407ZGT6 的 CANopen 伺服驱动器：CANopenNode v4 协议栈 + CiA402 驱动状态机 + FOC 电机控制。
 
-硬件：2804 无刷电机 + SimpleFOC Mini（DRV8313 3-PWM）+ AS5600 磁编码器（I2C）+ INA240A1 电流采样 + TJA1050 CAN 收发器。
+硬件：2804 无刷电机 + SimpleFOC Mini（DRV8313 3-PWM）+ AS5600 磁编码器（I2C）+ TJA1050 CAN 收发器。当前部署未安装 INA240。
 
 ---
 
@@ -14,11 +14,12 @@ canopen/
 ├── ld/STM32F407ZGT6.ld       # 链接脚本（1MB Flash，0x08000000）
 ├── src/
 │   ├── main.c                # 入口：HAL 初始化 + CANopen + 主循环
-│   ├── board.c/h             # 时钟/GPIO/USART/CAN/TIM/ADC/I2C 初始化
+│   ├── board.c/h             # 时钟/GPIO/USART/CAN/TIM/I2C，ADC 按需初始化
 │   ├── OD.h/.c               # 对象字典（DS301 + CiA402 + 运动参数）
 │   ├── canopen_app.c/h       # CANopenNode 初始化与对象字典扩展
 │   ├── cia402.c/h            # CiA402 电源状态机（pp/pv/hm 模式）
-│   ├── motor.c/h             # 电机驱动：TIM1 PWM + 电流/速度/位置环
+│   ├── motor.c/h             # 电机驱动：TIM1 PWM + 电压/速度/位置环 + 堵转保护
+│   ├── stall_guard.c/h       # 无电流传感器时的编码器堵转保护
 │   ├── foc.c/h               # FOC 数学：Clarke/Park/SVPWM/单相重构
 │   ├── encoder.c/h           # AS5600 磁编码器
 │   ├── pid.c/h               # 浮点 PID
@@ -40,7 +41,7 @@ canopen/
 | U/V/W 相 PWM | PE9 / PE11 / PE13 | TIM1_CH1/2/3 -> SimpleFOC IN1/2/3 |
 | 驱动使能 EN | PE14 | GPIO 输出 |
 | nSLEEP | PC4 | GPIO 输出（必须拉高） |
-| U 相电流 | PA3 | ADC1_IN3 <- INA240 OUT |
+| U 相电流 | PA3 | 可选 ADC1_IN3 <- INA240 OUT；当前未接，不初始化 ADC |
 | 编码器 | PB6 / PB7 | I2C1 -> AS5600 |
 | CAN | PD0 / PD1 | CAN1 -> TJA1050 |
 | 调试串口 | PA9 / PA10 | USART1 115200 |
@@ -112,17 +113,17 @@ powershell -ExecutionPolicy Bypass -File tools/run_native_tests.ps1
 └──────────────┬──────────────────────────────────┘
                │ Vq / Iq*
 ┌──────────────▼──────────────────────────────────┐
-│       20kHz 电流环 (TIM1 更新中断)               │
-│   INA240 采样 -> 重构 -> Clarke/Park -> PI       │
-│   -> 反Park -> SVPWM -> TIM1 CCR1/2/3           │
+│       20kHz 电压型 FOC (TIM1 更新中断)            │
+│   电角度 -> 反Park -> SVPWM -> TIM1 CCR1/2/3      │
 └─────────────────────────────────────────────────┘
 ```
 
-- 默认电压型 FOC（`FOC_CURRENT_LOOP_ENABLE=0`）：速度环直接输出 Vq，电流采样用于监控与过流保护，适合首次上电调试。
+- 默认无电流传感器电压型 FOC（`CURRENT_SENSE_PRESENT=0`、`FOC_CURRENT_LOOP_ENABLE=0`）：速度环直接输出 Vq；PA3/ADC1 不初始化，TFT 显示 `Iq: N/A`。
+- 无 INA240 时最大 Vq 为 1.0 V；目标速度绝对值至少 250 counts/s、Vq 至少 0.5 V，但实际速度持续低于 50 counts/s 达 0.75 s 时，驱动自动关 EN 并锁存 `0x8611` 堵转故障。
 - TIM1 使用普通 PWM 启动并单独开启更新中断；中心对齐模式每个完整 PWM 周期只执行一次 20kHz FOC。
 - AS5600 运行期使用 I2C 中断采样，TIM7 ISR 不再执行最长 50ms 的阻塞式 I2C 读取。
 - FOC 对齐会检查 TIM1 更新计数、编码器健康状态和转子实际位移；任一条件失败都会关闭 EN 并进入故障，不再打印假成功。
-- 电流型 FOC（`FOC_CURRENT_LOOP_ENABLE=1`）：速度环输出 Iq 目标，20kHz 电流环 PI 输出 Vd/Vq。需先标定 INA240 零点。
+- 电流型 FOC（`FOC_CURRENT_LOOP_ENABLE=1`）只允许在 `CURRENT_SENSE_PRESENT=1` 时编译；需重新安装并标定 INA240。
 - 单相电流重构：仅采样 U 相，按 B/C 相占空比分配估算另两相，低速/低占空比下精度有限，属成本优化方案。
 - 未使用 FreeRTOS：CANopenNode 本身非阻塞可裸机运行（1ms 定时器 + 主循环），避免 RTOS 移植复杂度。
 
@@ -159,9 +160,9 @@ python tools/drive_test.py --port COM7 --cmd disable
 2. CAN 工具读 0x1008/0x1018 确认节点上线，观察 Heartbeat。
 3. 空载手转电机，读 6064h 确认编码器计数连续变化、方向正确。
 4. 发送控制字 0x06 -> 0x07 -> 0x0F，每步读 6041h，预期基础状态依次为 0x0231、0x0233、0x0237。
-5. 设置 6060h=3，再给小目标（如 60FFh=1000）验证转向；测试完成先写 60FFh=0，再写 6040h=0 禁用。
+5. 设置 6060h=3，再给目标 60FFh=500 验证转向；首次测试必须使用限流电源。测试完成先写 60FFh=0，再写 6040h=0 禁用。
 6. 速度环 PID 从极小增益开始整定，再切位置模式调位置 P。
-7. 电流模式需先确认 INA240 零电流输出电压（应约 1.65V），必要时在 `config.h` 调整 `CURRENT_SENSE_OFFSET_V`。
+7. 若需要真实电流显示、过流保护或电流型 FOC，重新安装 INA240，并将 `CURRENT_SENSE_PRESENT` 改为 1 后再标定。
 
 ## 参考项目
 

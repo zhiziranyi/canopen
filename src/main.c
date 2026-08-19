@@ -91,8 +91,12 @@ static void tft_status_update(void)
     snprintf(buf, sizeof(buf), "%ld", (long)motor_get_velocity());
     tft_value(124, COLOR_WHITE, buf);
 
-    snprintf(buf, sizeof(buf), "%ldmA", (long)iq_ma);
-    tft_value(144, (iq_ma > 500 || iq_ma < -500) ? COLOR_RED : COLOR_GREEN, buf);
+    if (motor_has_current_sense()) {
+        snprintf(buf, sizeof(buf), "%ldmA", (long)iq_ma);
+        tft_value(144, (iq_ma > 500 || iq_ma < -500) ? COLOR_RED : COLOR_GREEN, buf);
+    } else {
+        tft_value(144, COLOR_YELLOW, "N/A");
+    }
 
     snprintf(buf, sizeof(buf), "0x%04X", (unsigned)OD_RAM.x603F_errorCode);
     tft_value(164, (OD_RAM.x603F_errorCode != 0u) ? COLOR_RED : COLOR_WHITE, buf);
@@ -189,21 +193,37 @@ int main(void)
             int32_t iq_ma = (int32_t)(motor_get_current_iq() * 1000.0f);
             int32_t iu_ma = (int32_t)(motor_get_current_u() * 1000.0f);
             int32_t vq_mv = (int32_t)(motor_get_voltage_cmd() * 1000.0f);
-            dbg_printf("[T] sw=%04X cw=%04X mode=%d tgt=%ld pos=%ld vel=%ld "
-                       "vq=%ldmV iu=%ldmA iq=%ldmA fault=%d ctrl=%lu encErr=%lu canErr=%08lX\r\n",
-                       (unsigned)OD_RAM.x6041_statusword,
-                       (unsigned)OD_RAM.x6040_controlword,
-                       (int)OD_RAM.x6061_modesOfOperationDisplay,
-                       (long)OD_RAM.x60FF_targetVelocity,
-                       (long)motor_get_position(),
-                       (long)motor_get_velocity(),
-                       (long)vq_mv,
-                       (long)iu_ma,
-                       (long)iq_ma,
-                       (int)motor_get_fault(),
-                       (unsigned long)motor_get_control_update_count(),
-                       (unsigned long)encoder_get_error_count(),
-                       (unsigned long)app_canopen_error_status());
+            if (motor_has_current_sense()) {
+                dbg_printf("[T] sw=%04X cw=%04X mode=%d tgt=%ld pos=%ld vel=%ld "
+                           "vq=%ldmV iu=%ldmA iq=%ldmA fault=%d ctrl=%lu encErr=%lu canErr=%08lX\r\n",
+                           (unsigned)OD_RAM.x6041_statusword,
+                           (unsigned)OD_RAM.x6040_controlword,
+                           (int)OD_RAM.x6061_modesOfOperationDisplay,
+                           (long)OD_RAM.x60FF_targetVelocity,
+                           (long)motor_get_position(),
+                           (long)motor_get_velocity(),
+                           (long)vq_mv,
+                           (long)iu_ma,
+                           (long)iq_ma,
+                           (int)motor_get_fault(),
+                           (unsigned long)motor_get_control_update_count(),
+                           (unsigned long)encoder_get_error_count(),
+                           (unsigned long)app_canopen_error_status());
+            } else {
+                dbg_printf("[T] sw=%04X cw=%04X mode=%d tgt=%ld pos=%ld vel=%ld "
+                           "vq=%ldmV iq=N/A fault=%d ctrl=%lu encErr=%lu canErr=%08lX\r\n",
+                           (unsigned)OD_RAM.x6041_statusword,
+                           (unsigned)OD_RAM.x6040_controlword,
+                           (int)OD_RAM.x6061_modesOfOperationDisplay,
+                           (long)OD_RAM.x60FF_targetVelocity,
+                           (long)motor_get_position(),
+                           (long)motor_get_velocity(),
+                           (long)vq_mv,
+                           (int)motor_get_fault(),
+                           (unsigned long)motor_get_control_update_count(),
+                           (unsigned long)encoder_get_error_count(),
+                           (unsigned long)app_canopen_error_status());
+            }
             tft_status_update();
         }
         /* 板载 LED 500ms 翻转：固件运行指示（不依赖串口） */

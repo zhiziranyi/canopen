@@ -4,6 +4,7 @@
 #include "foc.h"
 #include "motion_profile.h"
 #include "pid.h"
+#include "stall_guard.h"
 #include "voltage_limiter.h"
 
 #include <math.h>
@@ -102,6 +103,31 @@ static void test_voltage_limiter_ramps_and_soft_limits_current(void)
     CHECK_NEAR(voltage_limiter_step(&limiter, 2.0f, 0.50f,
                                     2.0f, 0.45f, 0.10f, 0.50f),
                0.0f, 1.0e-6f);
+}
+
+static void test_stall_guard_requires_command_voltage_and_no_motion(void)
+{
+    stall_guard_t guard;
+    unsigned index;
+
+    stall_guard_init(&guard);
+    CHECK_TRUE(!stall_guard_step(&guard, 50.0f, 0.8f, 0.0f, 0.001f,
+                                 100.0f, 0.5f, 10.0f, 0.300f));
+    CHECK_TRUE(!stall_guard_step(&guard, 500.0f, 0.2f, 0.0f, 0.001f,
+                                 100.0f, 0.5f, 10.0f, 0.300f));
+
+    for (index = 0u; index < 299u; ++index) {
+        CHECK_TRUE(!stall_guard_step(&guard, 500.0f, 0.8f, 0.0f, 0.001f,
+                                     100.0f, 0.5f, 10.0f, 0.300f));
+    }
+    CHECK_TRUE(stall_guard_step(&guard, 500.0f, 0.8f, 0.0f, 0.001f,
+                                100.0f, 0.5f, 10.0f, 0.300f));
+
+    stall_guard_init(&guard);
+    for (index = 0u; index < 400u; ++index) {
+        CHECK_TRUE(!stall_guard_step(&guard, 500.0f, 0.8f, 20.0f, 0.001f,
+                                     100.0f, 0.5f, 10.0f, 0.300f));
+    }
 }
 
 static void test_pid_saturates_and_resets(void)
@@ -236,6 +262,7 @@ int main(void)
     test_clarke_park_d_axis();
     test_fast_sin_cos_tracks_unit_circle();
     test_voltage_limiter_ramps_and_soft_limits_current();
+    test_stall_guard_requires_command_voltage_and_no_motion();
     test_pid_saturates_and_resets();
     test_encoder_wrap_is_one_count();
     test_encoder_accumulates_and_zeros_position();

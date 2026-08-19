@@ -3,6 +3,7 @@
  * @brief   STM32F407 板级初始化：时钟、GPIO、USART、CAN、TIM、ADC、I2C
  */
 #include "board.h"
+#include "config.h"
 #include "encoder.h"
 #include <stdarg.h>
 #include <stdio.h>
@@ -21,7 +22,9 @@ static void MX_USART1_UART_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM6_Init(void);
 static void MX_TIM7_Init(void);
+#if CURRENT_SENSE_PRESENT
 static void MX_ADC1_Init(void);
+#endif
 static void MX_I2C1_Init(void);
 
 /* ========================================================================
@@ -54,9 +57,13 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* timBaseHandle)
 
 void HAL_ADC_MspInit(ADC_HandleTypeDef* adcHandle)
 {
+#if CURRENT_SENSE_PRESENT
     if (adcHandle->Instance == ADC1) {
         __HAL_RCC_ADC1_CLK_ENABLE();
     }
+#else
+    (void)adcHandle;
+#endif
 }
 
 void HAL_I2C_MspInit(I2C_HandleTypeDef* i2cHandle)
@@ -128,7 +135,9 @@ void SystemClock_Config(void)
     __HAL_RCC_TIM1_CLK_ENABLE();
     __HAL_RCC_TIM6_CLK_ENABLE();
     __HAL_RCC_TIM7_CLK_ENABLE();
+#if CURRENT_SENSE_PRESENT
     __HAL_RCC_ADC1_CLK_ENABLE();
+#endif
     __HAL_RCC_I2C1_CLK_ENABLE();
 }
 
@@ -163,11 +172,13 @@ static void MX_GPIO_Init(void)
     HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
     HAL_GPIO_WritePin(GPIOC, PIN_DRV_NSLEEP_PIN, GPIO_PIN_SET);
 
-    /* PA3: ADC 模拟输入 */
+    /* PA3: 可选 INA240 电流采样输入 */
+#if CURRENT_SENSE_PRESENT
     GPIO_InitStruct.Pin = PIN_CURRENT_PIN;
     GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+#endif
 
     /* PB6/PB7: I2C1 */
     GPIO_InitStruct.Pin = PIN_ENC_SCL_PIN | PIN_ENC_SDA_PIN;
@@ -340,6 +351,7 @@ static void MX_TIM7_Init(void)
  * ADC1: 注入组单通道采样 U 相电流（软件触发，在 TIM1 更新 ISR 中启动）
  * 采样时间取最长，提高低阻抗源精度
  * ===================================================================== */
+#if CURRENT_SENSE_PRESENT
 static void MX_ADC1_Init(void)
 {
     ADC_ChannelConfTypeDef sConfig = {0};
@@ -380,6 +392,7 @@ static void MX_ADC1_Init(void)
     HAL_NVIC_SetPriority(ADC_IRQn, 1, 0);
     HAL_NVIC_EnableIRQ(ADC_IRQn);
 }
+#endif
 
 /* ========================================================================
  * I2C1: AS5600 磁编码器, 400kHz
@@ -416,7 +429,9 @@ void board_init(void)
     MX_TIM1_Init();
     MX_TIM6_Init();
     MX_TIM7_Init();
+#if CURRENT_SENSE_PRESENT
     MX_ADC1_Init();
+#endif
     MX_I2C1_Init();
 }
 
@@ -524,7 +539,9 @@ void CAN1_SCE_IRQHandler(void)
 
 void ADC_IRQHandler(void)
 {
+#if CURRENT_SENSE_PRESENT
     HAL_ADC_IRQHandler(&hadc1);
+#endif
 }
 
 void board_watchdog_init(void)
@@ -569,9 +586,13 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 
 void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
+#if CURRENT_SENSE_PRESENT
     if (hadc->Instance == ADC1) {
         motor_adc_complete_isr();
     }
+#else
+    (void)hadc;
+#endif
 }
 
 void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef* hi2c)

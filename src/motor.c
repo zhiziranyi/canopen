@@ -7,6 +7,7 @@
 #include "foc.h"
 #include "motion_profile.h"
 #include "pid.h"
+#include "stall_guard.h"
 #include "voltage_limiter.h"
 
 #include <math.h>
@@ -45,6 +46,7 @@ static pid_t s_vel_pid;
 static motion_profile_t s_position_profile;
 static float s_pos_kp = POS_P_DEFAULT;
 static voltage_limiter_t s_voltage_limiter;
+static stall_guard_t s_stall_guard;
 
 static float clamp01(float value)
 {
@@ -86,20 +88,26 @@ static void motor_latch_fault(motor_fault_t fault)
     s_velocity_cmd = 0.0f;
     s_overcurrent_samples = 0u;
     voltage_limiter_init(&s_voltage_limiter);
+    stall_guard_init(&s_stall_guard);
     pwm_set_duty(0.0f, 0.0f, 0.0f);
     HAL_GPIO_WritePin(PIN_DRV_EN_GPIO, PIN_DRV_EN_PIN, GPIO_PIN_RESET);
 }
 
 static int adc_start_sample(void)
 {
+#if CURRENT_SENSE_PRESENT
     HAL_StatusTypeDef status = HAL_ADCEx_InjectedStart_IT(&hadc1);
     if (status == HAL_OK || status == HAL_BUSY) {
         return 0;
     }
     motor_latch_fault(MOTOR_FAULT_INIT);
     return -1;
+#else
+    return 0;
+#endif
 }
 
+#if CURRENT_SENSE_PRESENT
 static int motor_calibrate_current_zero(void)
 {
     uint32_t start_tick = HAL_GetTick();
@@ -117,6 +125,7 @@ static int motor_calibrate_current_zero(void)
     dbg_printf("[CURRENT] zero=%u\r\n", (unsigned)s_current_offset_raw);
     return 0;
 }
+#endif
 
 static float wrap_mechanical_delta(float delta)
 {
@@ -141,6 +150,7 @@ int motor_init(void)
     s_current_calibrated = 0u;
     s_overcurrent_samples = 0u;
     voltage_limiter_init(&s_voltage_limiter);
+    stall_guard_init(&s_stall_guard);
     HAL_GPIO_WritePin(PIN_DRV_EN_GPIO, PIN_DRV_EN_PIN, GPIO_PIN_RESET);
     pwm_set_duty(0.0f, 0.0f, 0.0f);
 
@@ -162,9 +172,11 @@ int motor_init(void)
         return -1;
     }
 
+#if CURRENT_SENSE_PRESENT
     if (adc_start_sample() != 0 || motor_calibrate_current_zero() != 0) {
         return -1;
     }
+#endif
     (void)encoder_start_sample();
     if (!encoder_is_healthy()) {
         motor_latch_fault(MOTOR_FAULT_ENCODER);
@@ -251,6 +263,7 @@ void motor_enable(void)
     s_velocity_cmd = 0.0f;
     s_overcurrent_samples = 0u;
     voltage_limiter_init(&s_voltage_limiter);
+    stall_guard_init(&s_stall_guard);
     HAL_GPIO_WritePin(PIN_DRV_EN_GPIO, PIN_DRV_EN_PIN, GPIO_PIN_SET);
     s_enabled = 1;
 }
@@ -264,6 +277,7 @@ void motor_disable(void)
     s_position_mode = 0;
     s_overcurrent_samples = 0u;
     voltage_limiter_init(&s_voltage_limiter);
+    stall_guard_init(&s_stall_guard);
     motion_profile_stop(&s_position_profile);
     pwm_set_duty(0.0f, 0.0f, 0.0f);
     HAL_GPIO_WritePin(PIN_DRV_EN_GPIO, PIN_DRV_EN_PIN, GPIO_PIN_RESET);
@@ -306,6 +320,7 @@ void motor_stop(void)
     s_current_target = 0.0f;
     motion_profile_stop(&s_position_profile);
     pid_reset(&s_vel_pid);
+    stall_guard_init(&s_stall_guard);
 }
 
 void motor_set_profile(uint32_t vel_cps, uint32_t acc_cps2, uint32_t dec_cps2)
@@ -336,6 +351,7 @@ void motor_set_current_pi(float kp, float ki)
 float motor_get_current_u(void) { return s_iu; }
 float motor_get_current_iq(void) { return s_iq; }
 float motor_get_current_id(void) { return s_id; }
+int motor_has_current_sense(void) { return CURRENT_SENSE_PRESENT != 0; }
 float motor_get_voltage_cmd(void) { return s_vcmd; }
 int32_t motor_get_position(void) { return encoder_get_position(); }
 float motor_get_velocity(void) { return encoder_get_velocity(); }
@@ -353,6 +369,7 @@ const char* motor_fault_name(motor_fault_t fault)
         case MOTOR_FAULT_ALIGNMENT: return "alignment";
         case MOTOR_FAULT_ENCODER: return "encoder";
         case MOTOR_FAULT_OVERCURRENT: return "overcurrent";
+        case MOTOR_FAULT_STALL: return "stall";
         default: return "unknown";
     }
 }
@@ -362,21 +379,26 @@ void motor_clear_fault(void)
     if (s_fault == MOTOR_FAULT_ENCODER && !encoder_is_healthy()) {
         return;
     }
-    if (s_fault == MOTOR_FAULT_ENCODER || s_fault == MOTOR_FAULT_OVERCURRENT) {
+    if (s_fault == MOTOR_FAULT_ENCODER || s_fault == MOTOR_FAULT_OVERCURRENT
+        || s_fault == MOTOR_FAULT_STALL) {
         s_fault = MOTOR_FAULT_NONE;
     }
 }
 
 void motor_current_loop_isr(void)
 {
+#if CURRENT_SENSE_PRESENT
     float ia;
     float ib;
     float ic;
+#endif
     float electrical_angle;
     float sin_e;
     float cos_e;
+#if CURRENT_SENSE_PRESENT
     float id_value;
     float iq_value;
+#endif
     float du;
     float dv;
     float dw;
@@ -385,6 +407,7 @@ void motor_current_loop_isr(void)
 
     s_control_update_count++;
 
+#if CURRENT_SENSE_PRESENT
     if (s_aligning != 0u || s_enabled) {
         if (fabsf(s_iu) > OVERCURRENT_TRIP_A) {
             if (s_overcurrent_samples < OVERCURRENT_CONFIRM_SAMPLES) {
@@ -398,6 +421,7 @@ void motor_current_loop_isr(void)
             s_overcurrent_samples = 0u;
         }
     }
+#endif
 
     if (s_aligning != 0u) {
         fast_sin_cos(s_align_angle, &sin_e, &cos_e);
@@ -415,8 +439,8 @@ void motor_current_loop_isr(void)
         return;
     }
 
+#if CURRENT_SENSE_PRESENT
     ia = s_iu;
-
     du = (float)__HAL_TIM_GET_COMPARE(&htim1, TIM_CHANNEL_1)
        / (float)(__HAL_TIM_GET_AUTORELOAD(&htim1) + 1u);
     dv = (float)__HAL_TIM_GET_COMPARE(&htim1, TIM_CHANNEL_2)
@@ -424,12 +448,18 @@ void motor_current_loop_isr(void)
     dw = (float)__HAL_TIM_GET_COMPARE(&htim1, TIM_CHANNEL_3)
        / (float)(__HAL_TIM_GET_AUTORELOAD(&htim1) + 1u);
     foc_reconstruct_currents(ia, du, dv, dw, &ib, &ic);
+#endif
 
     electrical_angle = encoder_get_elec_angle_rad();
     fast_sin_cos(electrical_angle, &sin_e, &cos_e);
+#if CURRENT_SENSE_PRESENT
     foc_clarke_park(ia, ib, ic, sin_e, cos_e, &id_value, &iq_value);
     s_id = id_value;
     s_iq = iq_value;
+#else
+    s_id = 0.0f;
+    s_iq = 0.0f;
+#endif
 
 #if FOC_CURRENT_LOOP_ENABLE
     vd = pid_update(&s_curr_id_pid, -id_value);
@@ -481,10 +511,23 @@ void motor_velocity_loop_isr(void)
 #else
     s_torque_voltage = pid_update(&s_vel_pid, velocity_error);
 #endif
+
+#if !CURRENT_SENSE_PRESENT
+    if (!s_position_mode
+        && stall_guard_step(&s_stall_guard, s_velocity_cmd, s_vcmd,
+                            velocity_actual, 1.0f / (float)VEL_LOOP_HZ,
+                            STALL_GUARD_MIN_COMMAND_CPS,
+                            STALL_GUARD_MIN_VOLTAGE_V,
+                            STALL_GUARD_MIN_SPEED_CPS,
+                            STALL_GUARD_TIMEOUT_S)) {
+        motor_latch_fault(MOTOR_FAULT_STALL);
+    }
+#endif
 }
 
 void motor_adc_complete_isr(void)
 {
+#if CURRENT_SENSE_PRESENT
     uint32_t raw = HAL_ADCEx_InjectedGetValue(&hadc1, ADC_INJECTED_RANK_1);
 
     if (s_current_calibrated == 0u) {
@@ -498,4 +541,7 @@ void motor_adc_complete_isr(void)
 
     s_iu = ((float)((int32_t)raw - (int32_t)s_current_offset_raw)
           * CURRENT_SENSE_SCALE) / CURRENT_SENSE_GAIN;
+#else
+    s_iu = 0.0f;
+#endif
 }

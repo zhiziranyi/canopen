@@ -30,6 +30,8 @@ static uint16_t motor_fault_error_code(motor_fault_t fault)
             return 0xFF01u;
         case MOTOR_FAULT_ALIGNMENT:
             return 0xFF01u;
+        case MOTOR_FAULT_STALL:
+            return 0x8611u;
         case MOTOR_FAULT_NONE:
         default:
             return 0u;

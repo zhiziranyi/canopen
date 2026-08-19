@@ -1,12 +1,12 @@
 /**
  * @file    board.h
- * @brief   板级定义：STM32F407ZGT6 + SimpleFOC Mini + AS5600 + INA240 + TJA1050
+ * @brief   板级定义：STM32F407ZGT6 + SimpleFOC Mini + AS5600 + TJA1050
  *
  * 硬件接线（详见 开发参考方案.md）：
  *   PE9/PE11/PE13 - TIM1_CH1/2/3 -> SimpleFOC IN1/IN2/IN3 (U/V/W)
  *   PE14          - EN 使能
  *   PC4           - NSP (nSLEEP)，必须拉高
- *   PA3           - ADC1_IN3 <- INA240 OUT (U 相电流)
+ *   PA3           - 可选 ADC1_IN3 <- INA240 OUT（默认未接）
  *   PB6/PB7       - I2C1 -> AS5600 (SCL/SDA)
  *   PD0/PD1       - CAN1_RX/CAN1_TX -> TJA1050
  *   PA9/PA10      - USART1 调试串口 115200
@@ -29,7 +29,7 @@
 #define PIN_DRV_NSLEEP_GPIO GPIOC
 #define PIN_DRV_NSLEEP_PIN  GPIO_PIN_4
 
-/* INA240 电流采样 */
+/* 可选 INA240 电流采样 */
 #define PIN_CURRENT_GPIO  GPIOA
 #define PIN_CURRENT_PIN   GPIO_PIN_3
 #define ADC_CURRENT_CH    ADC_CHANNEL_3

@@ -17,7 +17,8 @@ typedef enum {
     MOTOR_FAULT_CONTROL_TIMING,
     MOTOR_FAULT_ALIGNMENT,
     MOTOR_FAULT_ENCODER,
-    MOTOR_FAULT_OVERCURRENT
+    MOTOR_FAULT_OVERCURRENT,
+    MOTOR_FAULT_STALL
 } motor_fault_t;
 
 int  motor_init(void);
@@ -41,6 +42,7 @@ void motor_set_current_pi(float kp, float ki);
 float   motor_get_current_u(void);
 float   motor_get_current_iq(void);
 float   motor_get_current_id(void);
+int     motor_has_current_sense(void);
 float   motor_get_voltage_cmd(void);
 int32_t motor_get_position(void);
 float   motor_get_velocity(void);
