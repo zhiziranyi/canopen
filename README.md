@@ -169,3 +169,12 @@ python tools/drive_test.py --port COM7 --cmd disable
 - [CANopenNode](https://github.com/CANopenNode/CANopenNode)（Apache 2.0 协议栈）
 - [CanOpenSTM32](https://github.com/CANopenNode/CanOpenSTM32)（STM32 HAL 移植）
 - [OpenBLT](https://github.com/feaser/openblt)（Bootloader 参考，本项目未使用）
+
+## 交接与验证
+
+- [项目交接文档：控制边界、硬件风险与日常维护](docs/HANDOVER.md)
+- [验证清单：构建、CANopen/CiA402、FOC 和故障路径](docs/VALIDATION.md)
+
+## 简历项目描述
+
+**STM32F407 CANopen CiA402 FOC 伺服驱动系统**：基于 STM32F407、CANopenNode 和 CiA402 实现 1 Mbps CANopen 伺服节点，构建 20 kHz 电压型 FOC、1 kHz 速度/位置环、AS5600 中断采样、CAN PDO/SDO 对象字典与堵转保护链路；提供 EDS、Python CAN 调试工具和 TFT 实时状态观测。
